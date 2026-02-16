@@ -99,5 +99,9 @@
         android:name="com.rise.RiseWidgetService"
         android:permission="android.permission.BIND_REMOTEVIEWS"
         android:exported="false" />
+      <service
+        android:name="com.rise.HabitGridService"
+        android:permission="android.permission.BIND_REMOTEVIEWS"
+        android:exported="false" />
     </application>
 </manifest>

@@ -123,23 +123,23 @@ class TaskTimerWidget : AppWidgetProvider() {
                     
                     // Play/Pause button
                     val action = if (isRunning) "pause" else "resume"
-                    val pauseIntent = Intent(context, TaskTimerWidget::class.java).apply {
-                        this.action = "com.rise.TIMER_ACTION"
-                        putExtra("timerAction", action)
-                        putExtra("itemId", id)
+                    val pauseIntent = Intent(context, MainActivity::class.java).apply {
+                        this.action = Intent.ACTION_VIEW
+                        data = Uri.parse("rise://timer-action/$action/$id")
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
                     }
-                    val pausePendingIntent = PendingIntent.getBroadcast(context, 200, pauseIntent, 
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE)
+                    val pausePendingIntent = PendingIntent.getActivity(context, 200, pauseIntent, 
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
                     views.setOnClickPendingIntent(R.id.timer_play_pause, pausePendingIntent)
                     
                     // Stop button
-                    val stopIntent = Intent(context, TaskTimerWidget::class.java).apply {
-                        this.action = "com.rise.TIMER_ACTION"
-                        putExtra("timerAction", "stop")
-                        putExtra("itemId", id)
+                    val stopIntent = Intent(context, MainActivity::class.java).apply {
+                        this.action = Intent.ACTION_VIEW
+                        data = Uri.parse("rise://timer-action/stop/$id")
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
                     }
-                    val stopPendingIntent = PendingIntent.getBroadcast(context, 201, stopIntent, 
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE)
+                    val stopPendingIntent = PendingIntent.getActivity(context, 201, stopIntent, 
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
                     views.setOnClickPendingIntent(R.id.timer_stop, stopPendingIntent)
                     
                     // Display click - open app to details

@@ -55,38 +55,59 @@ export interface Label {
     name: string;
 }
 
-activeTimer: {
-    id: string;
-    title: string;
-    type: 'task' | 'habit';
-    timeLeft: number;
-    goal: number;
-    isRunning: boolean;
-} | null;
+interface AppState {
+    activeProfile: { id: string; name: string } | null;
 
-// Task Actions
-addTask: (task: Omit<Task, 'id' | 'completed'>) => void;
-updateTask: (id: string, updates: Partial<Task>) => void;
-toggleTask: (id: string) => void;
-deleteTask: (id: string) => void;
-addLabel: (name: string) => void;
-deleteLabel: (id: string) => void;
+    // Deprecated, use activeProfile
+    currentUser: string | null;
 
-// Habit Actions
-addHabit: (habit: Omit<Habit, 'id' | 'completedDates' | 'streak' | 'bestStreak'>) => void;
-toggleHabit: (id: string, date: string) => void;
-updateHabit: (id: string, updates: Partial<Habit>) => void;
-updateNumericProgress: (id: string, date: string, amount: number) => void;
-updateTimerProgress: (id: string, date: string, seconds: number) => void;
-updateSensorProgress: (id: string, date: string, value: number) => void;
-deleteHabit: (id: string) => void;
+    tasks: Task[];
+    habits: Habit[];
+    labels: Label[];
 
-// Timer Actions
-startTimer: (id: string, title: string, type: 'task' | 'habit', goal: number) => void;
-pauseTimer: () => void;
-resumeTimer: () => void;
-stopTimer: () => void;
-tickTimer: () => void;
+    activeTimer: {
+        id: string;
+        title: string;
+        type: 'task' | 'habit';
+        timeLeft: number;
+        goal: number;
+        isRunning: boolean;
+    } | null;
+
+    // Auth/Profile Actions
+    login: (profile: { id: string; name: string }) => Promise<void>;
+    createProfile: (name: string) => Promise<void>; // New action
+
+    // Legacy support wrapper
+    setCurrentUser: (username: string) => Promise<void>;
+
+    logout: () => void;
+    loadData: (id: string) => Promise<void>;
+    saveData: () => Promise<void>;
+
+    // Task Actions
+    addTask: (task: Omit<Task, 'id' | 'completed'>) => void;
+    updateTask: (id: string, updates: Partial<Task>) => void;
+    toggleTask: (id: string) => void;
+    deleteTask: (id: string) => void;
+    addLabel: (name: string) => void;
+    deleteLabel: (id: string) => void;
+
+    // Habit Actions
+    addHabit: (habit: Omit<Habit, 'id' | 'completedDates' | 'streak' | 'bestStreak'>) => void;
+    toggleHabit: (id: string, date: string) => void;
+    updateHabit: (id: string, updates: Partial<Habit>) => void;
+    updateNumericProgress: (id: string, date: string, amount: number) => void;
+    updateTimerProgress: (id: string, date: string, seconds: number) => void;
+    updateSensorProgress: (id: string, date: string, value: number) => void;
+    deleteHabit: (id: string) => void;
+
+    // Timer Actions
+    startTimer: (id: string, title: string, type: 'task' | 'habit', goal: number) => void;
+    pauseTimer: () => void;
+    resumeTimer: () => void;
+    stopTimer: () => void;
+    tickTimer: () => void;
 }
 
 const DEFAULT_LABELS: Label[] = [

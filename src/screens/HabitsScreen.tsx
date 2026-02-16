@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, FlatList, TouchableOpacity, Modal } from 'react-native';
+import { View, FlatList, TouchableOpacity, Modal, ScrollView } from 'react-native';
 import { useRoute } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../theme';
@@ -65,6 +65,11 @@ export const HabitsScreen = () => {
                 numericUnit: newType === 'numeric' ? newNumericUnit : undefined,
                 reminders: [],
                 color: theme.colors.primary,
+                cue: selectedTemplate?.cue,
+                craving: selectedTemplate?.craving,
+                response: selectedTemplate?.response,
+                reward: selectedTemplate?.reward,
+                howToApply: selectedTemplate?.howToApply,
             });
             setNewTitle('');
             setNewDesc('');
@@ -72,7 +77,23 @@ export const HabitsScreen = () => {
             setNewTimerGoal('10');
             setNewNumericGoal('8');
             setNewNumericUnit('glasses');
+            setSelectedTemplate(null);
             setIsAddModalVisible(false);
+        }
+    };
+
+    const [selectedTemplate, setSelectedTemplate] = useState<HabitTemplate | null>(null);
+
+    const handleSelectTemplateInModal = (template: HabitTemplate) => {
+        setSelectedTemplate(template);
+        setNewTitle(template.title);
+        setNewDesc(template.description);
+        setNewType(template.type);
+        if (template.type === 'numeric') {
+            setNewNumericGoal(template.goal?.toString() || '8');
+            setNewNumericUnit(template.unit || 'units');
+        } else if (template.type === 'timer') {
+            setNewTimerGoal(((template.goal || 0) / 60).toString() || '10');
         }
     };
 
@@ -279,114 +300,155 @@ export const HabitsScreen = () => {
                 animationType="slide"
                 transparent={true}
                 visible={isAddModalVisible}
-                onRequestClose={() => setIsAddModalVisible(false)}
+                onRequestClose={() => {
+                    setIsAddModalVisible(false);
+                    // Reset state to prevent "auto-linking" or stale data
+                    setNewTitle('');
+                    setNewDesc('');
+                    setNewType('check');
+                    setNewTimerGoal('10');
+                    setNewNumericGoal('8');
+                    setNewNumericUnit('glasses');
+                }}
             >
                 <View style={styles.modalOverlay}>
                     <NothingCard style={[styles.modalContent, { backgroundColor: theme.colors.surface }]} padding="lg">
                         <View style={styles.modalHeader}>
                             <NothingText variant="bold" size={20}>NEW HABIT</NothingText>
-                            <TouchableOpacity onPress={() => setIsAddModalVisible(false)}>
+                            <TouchableOpacity onPress={() => {
+                                setIsAddModalVisible(false);
+                                setNewTitle('');
+                                setNewDesc('');
+                                setSelectedTemplate(null);
+                            }}>
                                 <X color={theme.colors.text} size={24} />
                             </TouchableOpacity>
                         </View>
 
-                        <NothingInput
-                            placeholder="Habit Name"
-                            value={newTitle}
-                            onChangeText={setNewTitle}
-                        />
+                        <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 500 }}>
+                            <View style={{ marginBottom: 16 }}>
+                                <NothingText variant="bold" size={12} color={theme.colors.textSecondary} style={{ marginBottom: 8, letterSpacing: 1 }}>BASE ON TEMPLATE (OPTIONAL)</NothingText>
+                                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -4 }}>
+                                    {COMMON_HABITS_TEMPLATES.filter(t => !t.isSensorBased).slice(0, 6).map(t => (
+                                        <TouchableOpacity
+                                            key={t.id}
+                                            onPress={() => handleSelectTemplateInModal(t)}
+                                            style={{
+                                                paddingHorizontal: 12,
+                                                paddingVertical: 8,
+                                                borderRadius: 8,
+                                                backgroundColor: selectedTemplate?.id === t.id ? theme.colors.primary + '20' : theme.colors.surface1,
+                                                borderColor: selectedTemplate?.id === t.id ? theme.colors.primary : theme.colors.border,
+                                                borderWidth: 1,
+                                                marginHorizontal: 4,
+                                                flexDirection: 'row',
+                                                alignItems: 'center'
+                                            }}
+                                        >
+                                            <NothingText size={12} color={selectedTemplate?.id === t.id ? theme.colors.primary : theme.colors.text}>{t.title}</NothingText>
+                                        </TouchableOpacity>
+                                    ))}
+                                </ScrollView>
+                            </View>
 
-                        <NothingInput
-                            placeholder="Description (Optional)"
-                            value={newDesc}
-                            onChangeText={setNewDesc}
-                            multiline
-                        />
+                            <NothingInput
+                                placeholder="Habit Name"
+                                value={newTitle}
+                                onChangeText={setNewTitle}
+                            />
 
-                        <View style={styles.freqRow}>
-                            {(['daily', 'weekly', 'monthly'] as const).map(f => (
+                            <NothingInput
+                                placeholder="Description (Optional)"
+                                value={newDesc}
+                                onChangeText={setNewDesc}
+                                multiline
+                            />
+
+                            <View style={styles.freqRow}>
+                                {(['daily', 'weekly', 'monthly'] as const).map(f => (
+                                    <TouchableOpacity
+                                        key={f}
+                                        onPress={() => setNewFreq(f)}
+                                        style={[
+                                            styles.freqChip,
+                                            { borderColor: theme.colors.border },
+                                            newFreq === f && { backgroundColor: theme.colors.text, borderColor: theme.colors.text }
+                                        ]}
+                                    >
+                                        <NothingText size={12} color={newFreq === f ? theme.colors.background : theme.colors.text}>
+                                            {f.toUpperCase()}
+                                        </NothingText>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+
+                            <NothingText variant="bold" size={14} style={{ marginBottom: 12 }}>GOAL TYPE</NothingText>
+                            <View style={styles.typeRow}>
                                 <TouchableOpacity
-                                    key={f}
-                                    onPress={() => setNewFreq(f)}
-                                    style={[
-                                        styles.freqChip,
-                                        { borderColor: theme.colors.border },
-                                        newFreq === f && { backgroundColor: theme.colors.text, borderColor: theme.colors.text }
-                                    ]}
+                                    style={[styles.typeBtn, newType === 'check' && { borderColor: theme.colors.text, backgroundColor: theme.colors.text + '10' }, { borderColor: theme.colors.border }]}
+                                    onPress={() => setNewType('check')}
                                 >
-                                    <NothingText size={12} color={newFreq === f ? theme.colors.background : theme.colors.text}>
-                                        {f.toUpperCase()}
-                                    </NothingText>
+                                    <Check size={18} color={newType === 'check' ? theme.colors.text : theme.colors.textSecondary} />
+                                    <NothingText size={10} style={{ marginLeft: 6 }}>CHECK</NothingText>
                                 </TouchableOpacity>
-                            ))}
-                        </View>
 
-                        <NothingText variant="bold" size={14} style={{ marginBottom: 12 }}>GOAL TYPE</NothingText>
-                        <View style={styles.typeRow}>
-                            <TouchableOpacity
-                                style={[styles.typeBtn, newType === 'check' && { borderColor: theme.colors.text, backgroundColor: theme.colors.text + '10' }, { borderColor: theme.colors.border }]}
-                                onPress={() => setNewType('check')}
-                            >
-                                <Check size={18} color={newType === 'check' ? theme.colors.text : theme.colors.textSecondary} />
-                                <NothingText size={10} style={{ marginLeft: 6 }}>CHECK</NothingText>
-                            </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.typeBtn, newType === 'numeric' && { borderColor: theme.colors.text, backgroundColor: theme.colors.text + '10' }, { borderColor: theme.colors.border }]}
+                                    onPress={() => setNewType('numeric')}
+                                >
+                                    <TrendingUp size={18} color={newType === 'numeric' ? theme.colors.text : theme.colors.textSecondary} />
+                                    <NothingText size={10} style={{ marginLeft: 6 }}>COUNT</NothingText>
+                                </TouchableOpacity>
 
-                            <TouchableOpacity
-                                style={[styles.typeBtn, newType === 'numeric' && { borderColor: theme.colors.text, backgroundColor: theme.colors.text + '10' }, { borderColor: theme.colors.border }]}
-                                onPress={() => setNewType('numeric')}
-                            >
-                                <TrendingUp size={18} color={newType === 'numeric' ? theme.colors.text : theme.colors.textSecondary} />
-                                <NothingText size={10} style={{ marginLeft: 6 }}>COUNT</NothingText>
-                            </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.typeBtn, newType === 'timer' && { borderColor: theme.colors.text, backgroundColor: theme.colors.text + '10' }, { borderColor: theme.colors.border }]}
+                                    onPress={() => setNewType('timer')}
+                                >
+                                    <Timer size={18} color={newType === 'timer' ? theme.colors.text : theme.colors.textSecondary} />
+                                    <NothingText size={10} style={{ marginLeft: 6 }}>TIMER</NothingText>
+                                </TouchableOpacity>
+                            </View>
 
-                            <TouchableOpacity
-                                style={[styles.typeBtn, newType === 'timer' && { borderColor: theme.colors.text, backgroundColor: theme.colors.text + '10' }, { borderColor: theme.colors.border }]}
-                                onPress={() => setNewType('timer')}
-                            >
-                                <Timer size={18} color={newType === 'timer' ? theme.colors.text : theme.colors.textSecondary} />
-                                <NothingText size={10} style={{ marginLeft: 6 }}>TIMER</NothingText>
-                            </TouchableOpacity>
-                        </View>
+                            {newType === 'numeric' && (
+                                <View style={{ marginBottom: 24, flexDirection: 'row', gap: 12 }}>
+                                    <View style={{ flex: 1 }}>
+                                        <NothingText variant="bold" size={14} style={{ marginBottom: 8 }}>GOAL</NothingText>
+                                        <NothingInput
+                                            placeholder="8"
+                                            value={newNumericGoal}
+                                            onChangeText={setNewNumericGoal}
+                                            keyboardType="numeric"
+                                        />
+                                    </View>
+                                    <View style={{ flex: 2 }}>
+                                        <NothingText variant="bold" size={14} style={{ marginBottom: 8 }}>UNIT</NothingText>
+                                        <NothingInput
+                                            placeholder="glasses"
+                                            value={newNumericUnit}
+                                            onChangeText={setNewNumericUnit}
+                                        />
+                                    </View>
+                                </View>
+                            )}
 
-                        {newType === 'numeric' && (
-                            <View style={{ marginBottom: 24, flexDirection: 'row', gap: 12 }}>
-                                <View style={{ flex: 1 }}>
-                                    <NothingText variant="bold" size={14} style={{ marginBottom: 8 }}>GOAL</NothingText>
+                            {newType === 'timer' && (
+                                <View style={{ marginBottom: 24 }}>
+                                    <NothingText variant="bold" size={14} style={{ marginBottom: 12 }}>GOAL DURATION (MINS)</NothingText>
                                     <NothingInput
-                                        placeholder="8"
-                                        value={newNumericGoal}
-                                        onChangeText={setNewNumericGoal}
+                                        placeholder="10"
+                                        value={newTimerGoal}
+                                        onChangeText={setNewTimerGoal}
                                         keyboardType="numeric"
                                     />
                                 </View>
-                                <View style={{ flex: 2 }}>
-                                    <NothingText variant="bold" size={14} style={{ marginBottom: 8 }}>UNIT</NothingText>
-                                    <NothingInput
-                                        placeholder="glasses"
-                                        value={newNumericUnit}
-                                        onChangeText={setNewNumericUnit}
-                                    />
-                                </View>
-                            </View>
-                        )}
+                            )}
 
-                        {newType === 'timer' && (
-                            <View style={{ marginBottom: 24 }}>
-                                <NothingText variant="bold" size={14} style={{ marginBottom: 12 }}>GOAL DURATION (MINS)</NothingText>
-                                <NothingInput
-                                    placeholder="10"
-                                    value={newTimerGoal}
-                                    onChangeText={setNewTimerGoal}
-                                    keyboardType="numeric"
-                                />
-                            </View>
-                        )}
-
-                        <NothingButton
-                            label="Start Tracking"
-                            onPress={handleAddHabit}
-                            style={styles.submitBtn}
-                        />
+                            <NothingButton
+                                label="Start Tracking"
+                                onPress={handleAddHabit}
+                                style={styles.submitBtn}
+                            />
+                        </ScrollView>
                     </NothingCard>
                 </View>
             </Modal>

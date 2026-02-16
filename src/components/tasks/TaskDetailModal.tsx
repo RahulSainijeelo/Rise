@@ -149,7 +149,6 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
 
                                 <View style={[styles.metaItem, { flex: 2, backgroundColor: theme.colors.surface, borderColor: theme.colors.border, borderWidth: 1 }]}>
                                     <View style={styles.metaTextContainer}>
-                                        <NothingText size={10} color={theme.colors.textSecondary} style={{ letterSpacing: 1 }}>NEXT ALERT</NothingText>
                                         <NothingText size={14} color={theme.colors.primary}>
                                             {task.dueDate && task.reminders?.length > 0
                                                 ? dayjs(`${task.dueDate} ${task.dueTime || '09:00'}`).format('DD MMM, HH:mm')

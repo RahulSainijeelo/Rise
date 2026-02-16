@@ -9,6 +9,7 @@ export interface WidgetItem {
     title: string;
     status: 'pending' | 'completed';
     type: 'task' | 'habit';
+    habitType?: 'check' | 'timer' | 'numeric';
     category?: string;
     dueDate?: string;
     dueTime?: string;
@@ -44,14 +45,15 @@ export const WidgetService = {
                 priority: t.priority || 4
             }));
 
-            // Include all habits
+            // Include all habits with their specific types
             const widgetHabits: WidgetItem[] = (habits || []).map(h => ({
                 id: h.id,
                 title: h.title,
                 status: h.completedDates?.includes(today) ? 'completed' : 'pending',
                 type: 'habit' as const,
-                dueDate: today, // Habits are always for today
-                priority: 4 // Habits don't have priority
+                habitType: h.type || 'check',
+                dueDate: today,
+                priority: 4
             }));
 
             const allItems = [...widgetTasks, ...widgetHabits];

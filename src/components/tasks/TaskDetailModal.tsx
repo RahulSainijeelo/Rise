@@ -26,8 +26,8 @@ interface TaskDetailModalProps {
     onToggleSubtask: (taskId: string, subtaskId: string) => void;
     onDeleteSubtask: (taskId: string, subtaskId: string) => void;
     onUpdatePriority: (taskId: string, priority: 1 | 2 | 3 | 4) => void;
-    onUpdateLabel: (taskId: string) => void; // Trigger label picker
-    onUpdateDate: (taskId: string) => void;  // Trigger date picker
+    onUpdateLabel: (taskId: string) => void;
+    onUpdateDate: (taskId: string, type?: 'date' | 'duration') => void;
     getPriorityColor: (priority: number) => string;
 }
 
@@ -132,6 +132,31 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                                         </NothingText>
                                     </View>
                                 </TouchableOpacity>
+                            </View>
+
+                            <View style={[styles.metaRow, { marginBottom: 32 }]}>
+                                <TouchableOpacity
+                                    style={[styles.metaItem, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, borderWidth: 1 }]}
+                                    onPress={() => (onUpdateDate as any)(task.id, 'duration')} // We'll handle this in TasksScreen
+                                >
+                                    <AlertCircle size={16} color={theme.colors.textSecondary} />
+                                    <View style={styles.metaTextContainer}>
+                                        <NothingText size={14} color={theme.colors.text}>
+                                            {task.duration ? `${task.duration}m` : 'No Duration'}
+                                        </NothingText>
+                                    </View>
+                                </TouchableOpacity>
+
+                                <View style={[styles.metaItem, { flex: 2, backgroundColor: theme.colors.surface, borderColor: theme.colors.border, borderWidth: 1 }]}>
+                                    <View style={styles.metaTextContainer}>
+                                        <NothingText size={10} color={theme.colors.textSecondary} style={{ letterSpacing: 1 }}>NEXT ALERT</NothingText>
+                                        <NothingText size={14} color={theme.colors.primary}>
+                                            {task.dueDate && task.reminders?.length > 0
+                                                ? dayjs(`${task.dueDate} ${task.dueTime || '09:00'}`).format('DD MMM, HH:mm')
+                                                : 'NO ALERTS SET'}
+                                        </NothingText>
+                                    </View>
+                                </View>
                             </View>
 
                             <NothingText variant="bold" size={16} style={styles.sectionTitle}>

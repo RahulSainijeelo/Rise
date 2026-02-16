@@ -3,6 +3,8 @@ import dayjs from 'dayjs';
 import { StorageService } from '../services/StorageService';
 import { WidgetService } from '../services/WidgetService';
 import { notificationService } from '../services/NotificationService';
+import { SoundService } from '../services/SoundService';
+import { SettingsService } from '../services/SettingsService';
 
 export interface Task {
     id: string;
@@ -63,6 +65,15 @@ interface AppState {
     habits: Habit[];
     labels: Label[];
 
+    activeTimer: {
+        id: string;
+        title: string;
+        type: 'task' | 'habit';
+        timeLeft: number;
+        goal: number;
+        isRunning: boolean;
+    } | null;
+
     // Auth/Profile Actions
     login: (profile: { id: string; name: string }) => Promise<void>;
     createProfile: (name: string) => Promise<void>; // New action
@@ -90,6 +101,13 @@ interface AppState {
     updateTimerProgress: (id: string, date: string, seconds: number) => void;
     updateSensorProgress: (id: string, date: string, value: number) => void;
     deleteHabit: (id: string) => void;
+
+    // Timer Actions
+    startTimer: (id: string, title: string, type: 'task' | 'habit', goal: number) => void;
+    pauseTimer: () => void;
+    resumeTimer: () => void;
+    stopTimer: () => void;
+    tickTimer: () => void;
 }
 
 const DEFAULT_LABELS: Label[] = [
@@ -100,14 +118,23 @@ const DEFAULT_LABELS: Label[] = [
 
 export const useAppStore = create<AppState>((set, get) => ({
     activeProfile: null,
-    currentUser: null, // Computed getter ideally, but for now duplicate sync
+    currentUser: null,
     tasks: [],
     habits: [],
     labels: DEFAULT_LABELS,
+    activeTimer: null,
 
     login: async (profile) => {
         set({ activeProfile: profile, currentUser: profile.name });
         await get().loadData(profile.id);
+
+        // Auto-set as default if no default exists
+        const { SettingsService } = await import('../services/SettingsService');
+        const settings = await SettingsService.getSettings();
+        if (!settings.defaultProfile) {
+            await SettingsService.updateSettings({ defaultProfile: profile.id });
+            console.log(`Auto-set ${profile.name} as default profile`);
+        }
     },
 
     createProfile: async (name) => {
@@ -148,10 +175,10 @@ export const useAppStore = create<AppState>((set, get) => ({
             });
             // Update widget with loaded data
             const loadedLabels = data.labels && Array.isArray(data.labels) ? data.labels : DEFAULT_LABELS;
-            WidgetService.updateWidget(tasks, habits, loadedLabels);
+            WidgetService.updateWidget(tasks, habits, loadedLabels, get().activeTimer);
         } else {
             set({ tasks: [], habits: [] });
-            WidgetService.updateWidget([], [], DEFAULT_LABELS);
+            WidgetService.updateWidget([], [], DEFAULT_LABELS, null);
         }
     },
 
@@ -166,7 +193,7 @@ export const useAppStore = create<AppState>((set, get) => ({
                 labels
             };
             await StorageService.saveUserData(activeProfile.id, dataToSave);
-            WidgetService.updateWidget(tasks, habits, labels);
+            WidgetService.updateWidget(tasks, habits, labels, get().activeTimer);
         }
     },
 
@@ -208,15 +235,22 @@ export const useAppStore = create<AppState>((set, get) => ({
     },
 
     toggleTask: (id) => {
-        set((state) => ({
-            tasks: state.tasks.map((t) => t.id === id ? { ...t, completed: !t.completed } : t)
-        }));
+        set((state) => {
+            const task = state.tasks.find(t => t.id === id);
+            if (task && !task.completed) {
+                SoundService.playSound('complete');
+            }
+            return {
+                tasks: state.tasks.map((t) => t.id === id ? { ...t, completed: !t.completed } : t)
+            };
+        });
         get().saveData();
     },
 
     deleteTask: (id) => {
         // Cancel reminders before deleting
         notificationService.cancelTaskReminders(id);
+        SoundService.playSound('delete');
 
         set((state) => ({
             tasks: state.tasks.filter((t) => t.id !== id)
@@ -294,7 +328,26 @@ export const useAppStore = create<AppState>((set, get) => ({
                         }
                     }
 
-                    const bestStreak = Math.max(h.bestStreak || 0, streak);
+                    // For best streak: Recalculate based on full history to handle undo cases
+                    let bestStreak = 0;
+                    if (sortedDates.length > 0) {
+                        let currentCount = 1;
+                        bestStreak = 1;
+                        for (let i = 0; i < sortedDates.length - 1; i++) {
+                            const curr = dayjs(sortedDates[i]);
+                            const next = dayjs(sortedDates[i + 1]);
+                            if (curr.subtract(1, 'day').format('YYYY-MM-DD') === next.format('YYYY-MM-DD')) {
+                                currentCount++;
+                                bestStreak = Math.max(bestStreak, currentCount);
+                            } else {
+                                currentCount = 1;
+                            }
+                        }
+                    }
+
+                    if (!isCompleted) {
+                        SoundService.playSound('complete');
+                    }
 
                     return { ...h, completedDates: newCompletedDates, streak, bestStreak };
                 }
@@ -485,12 +538,59 @@ export const useAppStore = create<AppState>((set, get) => ({
     },
 
     deleteHabit: (id) => {
-        // Cancel reminders before deleting
+        // Cancel first
         notificationService.cancelHabitReminders(id);
+        SoundService.playSound('delete');
 
         set((state) => ({
             habits: state.habits.filter((h) => h.id !== id)
         }));
         get().saveData();
+    },
+
+    startTimer: (id, title, type, goal) => {
+        set({ activeTimer: { id, title, type, timeLeft: goal, goal, isRunning: true } });
+        get().saveData();
+    },
+    pauseTimer: () => {
+        set((state) => ({
+            activeTimer: state.activeTimer ? { ...state.activeTimer, isRunning: false } : null
+        }));
+        get().saveData();
+    },
+    resumeTimer: () => {
+        set((state) => ({
+            activeTimer: state.activeTimer ? { ...state.activeTimer, isRunning: true } : null
+        }));
+        get().saveData();
+    },
+    stopTimer: () => {
+        set({ activeTimer: null });
+        get().saveData();
+    },
+    tickTimer: () => {
+        set((state) => {
+            if (!state.activeTimer || !state.activeTimer.isRunning) return { habits: state.habits };
+            const nextTime = state.activeTimer.timeLeft - 1;
+            if (nextTime <= 0) {
+                SoundService.playSound('timer_end');
+                // Auto-toggle habit if it was a habit timer
+                if (state.activeTimer.type === 'habit') {
+                    const habitId = state.activeTimer.id;
+                    const today = dayjs().format('YYYY-MM-DD');
+                    const habits = state.habits.map(h => {
+                        if (h.id === habitId && !h.completedDates.includes(today)) {
+                            return { ...h, completedDates: [...h.completedDates, today] };
+                        }
+                        return h;
+                    });
+                    return { activeTimer: null, habits };
+                }
+                return { activeTimer: null };
+            }
+            const updatedTimer = { ...state.activeTimer, timeLeft: nextTime };
+            WidgetService.updateWidget(state.tasks, state.habits, state.labels, updatedTimer);
+            return { activeTimer: updatedTimer };
+        });
     },
 }));

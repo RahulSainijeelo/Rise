@@ -78,8 +78,29 @@
         <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
         <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_sunset_info" />
       </receiver>
+
+      <receiver android:name="com.rise.TaskTimerWidget" android:exported="true" android:label="Rise: Timer">
+        <intent-filter>
+            <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            <action android:name="com.rise.TIMER_ACTION" />
+        </intent-filter>
+        <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_timer_info" />
+      </receiver>
+
+      <receiver android:name="com.rise.HabitControlWidget" android:exported="true" android:label="Rise: Habit">
+        <intent-filter>
+            <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            <action android:name="com.rise.TOGGLE_HABIT_WIDGET" />
+        </intent-filter>
+        <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_habit_info" />
+      </receiver>
+
       <service
         android:name="com.rise.RiseWidgetService"
+        android:permission="android.permission.BIND_REMOTEVIEWS"
+        android:exported="false" />
+      <service
+        android:name="com.rise.HabitGridService"
         android:permission="android.permission.BIND_REMOTEVIEWS"
         android:exported="false" />
     </application>

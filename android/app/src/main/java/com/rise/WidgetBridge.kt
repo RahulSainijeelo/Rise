@@ -7,9 +7,35 @@ import android.content.Intent
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.modules.core.DeviceEventManagerModule
 import android.util.Log
+import org.json.JSONObject
 
 class WidgetBridge(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
+
+    private fun sendEvent(eventName: String, params: String) {
+        reactApplicationContext
+            .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+            .emit(eventName, params)
+    }
+
+    @ReactMethod
+    fun emitTimerAction(action: String, id: String) {
+        val params = JSONObject().apply {
+            put("action", action)
+            put("id", id)
+        }
+        sendEvent("onTimerAction", params.toString())
+    }
+
+    @ReactMethod
+    fun emitHabitAction(action: String, id: String) {
+        val params = JSONObject().apply {
+            put("action", action)
+            put("id", id)
+        }
+        sendEvent("onHabitAction", params.toString())
+    }
 
     override fun getName(): String {
         return "WidgetBridge"
@@ -62,18 +88,48 @@ class WidgetBridge(reactContext: ReactApplicationContext) : ReactContextBaseJava
     }
 
     @ReactMethod
-    fun setWidgetLabel(labelName: String) {
+    fun setTimerData(data: String) {
         try {
-            Log.d("WidgetBridge", "Setting selected label: $labelName")
+            Log.d("WidgetBridge", "Setting timer data: $data")
             val sharedPref = reactApplicationContext.getSharedPreferences("RiseWidgetPrefs", Context.MODE_PRIVATE)
             with(sharedPref.edit()) {
-                putString("selectedLabel", labelName)
+                putString("timerData", data)
                 apply()
             }
-
             notifyWidgetUpdate()
         } catch (e: Exception) {
-            Log.e("WidgetBridge", "Error updating widget label", e)
+            Log.e("WidgetBridge", "Error updating timer data", e)
+        }
+    }
+
+    @ReactMethod
+    fun setHabitHistoryData(data: String) {
+        try {
+            Log.d("WidgetBridge", "Setting habit history data: ${data.take(100)}...")
+            val sharedPref = reactApplicationContext.getSharedPreferences("RiseWidgetPrefs", Context.MODE_PRIVATE)
+            with(sharedPref.edit()) {
+                putString("habitHistoryData", data)
+                apply()
+            }
+            notifyWidgetUpdate()
+        } catch (e: Exception) {
+            Log.e("WidgetBridge", "Error updating habit history data", e)
+        }
+    }
+
+    @ReactMethod
+    fun pinHabit(habitId: String, title: String) {
+        try {
+            Log.d("WidgetBridge", "Pinning habit: $habitId ($title)")
+            val sharedPref = reactApplicationContext.getSharedPreferences("RiseWidgetPrefs", Context.MODE_PRIVATE)
+            with(sharedPref.edit()) {
+                putString("pinnedHabitId", habitId)
+                putString("pinnedHabitTitle", title)
+                apply()
+            }
+            notifyWidgetUpdate()
+        } catch (e: Exception) {
+            Log.e("WidgetBridge", "Error pinning habit", e)
         }
     }
 

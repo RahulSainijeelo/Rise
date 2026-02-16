@@ -21,7 +21,7 @@ export interface WidgetLabel {
 }
 
 export const WidgetService = {
-    updateWidget: (tasks: any[], habits: any[], labels?: any[]) => {
+    updateWidget: (tasks: any[], habits: any[], labels?: any[], activeTimer?: any) => {
         // Guard against non-Android or missing native module
         if (Platform.OS !== 'android') return;
         if (!WidgetBridge || typeof WidgetBridge.setWidgetData !== 'function') {
@@ -79,6 +79,35 @@ export const WidgetService = {
             // Send labels separately if the method exists
             if (typeof WidgetBridge.setWidgetLabels === 'function') {
                 WidgetBridge.setWidgetLabels(JSON.stringify(widgetLabels));
+            }
+
+            // Sync Active Timer
+            if (activeTimer && typeof WidgetBridge.setTimerData === 'function') {
+                WidgetBridge.setTimerData(JSON.stringify(activeTimer));
+            } else if (!activeTimer && typeof WidgetBridge.setTimerData === 'function') {
+                WidgetBridge.setTimerData(JSON.stringify(null));
+            }
+
+            // Sync Habit History (last 35 days for heatmap)
+            if (typeof WidgetBridge.setHabitHistoryData === 'function') {
+                const habitHistory: any = {};
+                (habits || []).forEach(h => {
+                    const history = [];
+                    for (let i = 0; i < 35; i++) {
+                        const date = dayjs().subtract(34 - i, 'day').format('YYYY-MM-DD');
+                        history.push({
+                            date,
+                            completed: h.completedDates?.includes(date) || false
+                        });
+                    }
+                    habitHistory[h.id] = {
+                        title: h.title,
+                        history,
+                        streak: h.streak || 0,
+                        bestStreak: h.bestStreak || 0
+                    };
+                });
+                WidgetBridge.setHabitHistoryData(JSON.stringify(habitHistory));
             }
 
             // Dedicated payload for the 5 new sensor widgets

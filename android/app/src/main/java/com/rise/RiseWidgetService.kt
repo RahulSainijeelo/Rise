@@ -31,6 +31,7 @@ class RiseWidgetFactory(private val context: Context) : RemoteViewsService.Remot
         val dueDate: String,
         val dueTime: String?,
         val priority: Int,
+        val habitType: String? = null,
         val isDateHeader: Boolean = false
     )
 
@@ -50,12 +51,21 @@ class RiseWidgetFactory(private val context: Context) : RemoteViewsService.Remot
             
             val jsonArray = JSONArray(dataString)
             val tempItems = mutableListOf<WidgetItem>()
+            val inputFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+            val todayStr = inputFormat.format(java.util.Date())
             
             for (i in 0 until jsonArray.length()) {
                 val obj = jsonArray.getJSONObject(i)
                 val id = obj.optString("id", "")
                 
                 if (id == "__not_logged_in__") continue
+                
+                val dueDate = obj.optString("dueDate", "")
+                
+                // Hide past dates
+                if (dueDate.isNotEmpty() && dueDate < todayStr) {
+                    continue
+                }
                 
                 val category = obj.optString("category", "Inbox")
                 val type = obj.optString("type", "task")
@@ -77,7 +87,8 @@ class RiseWidgetFactory(private val context: Context) : RemoteViewsService.Remot
                     category = category,
                     dueDate = obj.optString("dueDate", ""),
                     dueTime = dueTime,
-                    priority = obj.optInt("priority", 4)
+                    priority = obj.optInt("priority", 4),
+                    habitType = obj.optString("habitType", null)
                 ))
             }
             
@@ -152,12 +163,23 @@ class RiseWidgetFactory(private val context: Context) : RemoteViewsService.Remot
                 views.setViewVisibility(R.id.widget_item_checkbox, View.GONE)
                 // Transparent background for headers
                 views.setInt(R.id.widget_item_container, "setBackgroundColor", Color.TRANSPARENT)
+                
+                // Minimal padding for headers (4dp top, 8dp bottom as requested)
+                val density = context.resources.displayMetrics.density
+                val topPadding = (4 * density).toInt()
+                val bottomPadding = (8 * density).toInt()
+                val sidePadding = (10 * density).toInt()
+                views.setViewPadding(R.id.widget_item_container, sidePadding, topPadding, sidePadding, bottomPadding)
+                
                 views.setOnClickFillInIntent(R.id.widget_item_container, Intent())
             } else {
                 val isCompleted = item.status.equals("completed", ignoreCase = true)
                 
-                // Reset background for task/habit items
+                // Reset background and padding for task/habit items
                 views.setInt(R.id.widget_item_container, "setBackgroundResource", R.drawable.widget_item_bg)
+                val density = context.resources.displayMetrics.density
+                val padding = (10 * density).toInt()
+                views.setViewPadding(R.id.widget_item_container, padding, padding, padding, padding)
                 
                 // Checkbox
                 views.setViewVisibility(R.id.widget_item_checkbox, View.VISIBLE)
@@ -183,7 +205,15 @@ class RiseWidgetFactory(private val context: Context) : RemoteViewsService.Remot
                 }
                 
                 // Type indicator
-                val typeIndicator = if (item.type == "habit") "H" else "T"
+                var typeIndicator = if (item.type == "habit") "H" else "T"
+                if (item.type == "habit" && item.habitType != null) {
+                    typeIndicator = when (item.habitType) {
+                        "timer" -> "H(T)"
+                        "numeric" -> "H(N)"
+                        else -> "H"
+                    }
+                }
+                
                 views.setTextViewText(R.id.widget_item_type, typeIndicator)
                 views.setTextColor(R.id.widget_item_type, 
                     if (item.type == "habit") 0xFFE91E63.toInt() else 0xFF2196F3.toInt())

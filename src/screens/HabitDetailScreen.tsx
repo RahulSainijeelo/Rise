@@ -380,7 +380,7 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
                                         {habit.isSensorBased ? (
                                             habit.sensorType === 'pedometer' ? liveData.steps :
                                                 habit.sensorType === 'noise' ? liveData.noise :
-                                                    habit.numericProgress?.[today].toFixed(2) || 0
+                                                    (habit.numericProgress?.[today] || 0).toFixed(2)
                                         ) : (
                                             habit.numericProgress?.[today] || 0
                                         )}

@@ -48,19 +48,28 @@ class HabitControlWidget : AppWidgetProvider() {
             
             val sharedPref = context.getSharedPreferences("RiseWidgetPrefs", Context.MODE_PRIVATE)
             val historyDataStr = sharedPref.getString("habitHistoryData", "{}") ?: "{}"
+            val pinnedHabitId = sharedPref.getString("pinnedHabitId", null)
             
             try {
                 val allHistory = JSONObject(historyDataStr)
                 val keys = allHistory.keys()
                 
-                if (!keys.hasNext()) {
+                // Use pinned habit if it exists in history, otherwise pick first, or show empty
+                val habitId = if (pinnedHabitId != null && allHistory.has(pinnedHabitId)) {
+                    pinnedHabitId
+                } else if (keys.hasNext()) {
+                    keys.next()
+                } else {
+                    null
+                }
+
+                if (habitId == null) {
                     views.setTextViewText(R.id.habit_title, "NO HABITS")
+                    views.setTextViewText(R.id.habit_streak_text, "PIN A HABIT FROM APP")
                     views.setViewVisibility(R.id.habit_calendar_grid, View.GONE)
                     views.setViewVisibility(R.id.habit_toggle_btn, View.GONE)
                 } else {
-                    // Pick the first habit for now or one that is "starred" (not implemented yet)
-                    val firstId = keys.next()
-                    val habitData = allHistory.getJSONObject(firstId)
+                    val habitData = allHistory.getJSONObject(habitId)
                     
                     views.setTextViewText(R.id.habit_title, habitData.optString("title", "HABIT"))
                     views.setTextViewText(R.id.habit_streak_text, "STREAK: ${habitData.optInt("streak", 0)}")
@@ -68,37 +77,38 @@ class HabitControlWidget : AppWidgetProvider() {
                     views.setViewVisibility(R.id.habit_calendar_grid, View.VISIBLE)
                     views.setViewVisibility(R.id.habit_toggle_btn, View.VISIBLE)
 
-                    // Setup GridView Adapter
+                    // Setup GridView Adapter - Ensure unique data to prevent caching issues
                     val serviceIntent = Intent(context, HabitGridService::class.java).apply {
                         putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
-                        putExtra("habitId", firstId)
-                        data = Uri.parse(toUri(Intent.URI_INTENT_SCHEME))
+                        putExtra("habitId", habitId)
+                        data = Uri.parse("rise://habit-grid/$habitId/$appWidgetId")
                     }
                     views.setRemoteAdapter(R.id.habit_calendar_grid, serviceIntent)
                     
                     // Toggle button click
                     val toggleIntent = Intent(context, MainActivity::class.java).apply {
                         this.action = Intent.ACTION_VIEW
-                        data = Uri.parse("rise://habit-toggle/$firstId")
+                        data = Uri.parse("rise://habit-toggle/$habitId")
                         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
                     }
-                    val togglePendingIntent = PendingIntent.getActivity(context, 300, toggleIntent, 
+                    val togglePendingIntent = PendingIntent.getActivity(context, 300 + appWidgetId, toggleIntent, 
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
                     views.setOnClickPendingIntent(R.id.habit_toggle_btn, togglePendingIntent)
                     
-                    // Logo click opens app
-                    val intent = Intent(context, MainActivity::class.java).apply {
+                    // Interaction - open app
+                    val detailIntent = Intent(context, MainActivity::class.java).apply {
                         this.action = Intent.ACTION_VIEW
-                        data = Uri.parse("rise://item/$firstId/habit")
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        data = Uri.parse("rise://item/$habitId/habit")
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
                     }
-                    val pendingIntent = PendingIntent.getActivity(context, 301, intent, 
+                    val detailPendingIntent = PendingIntent.getActivity(context, 301 + appWidgetId, detailIntent, 
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-                    views.setOnClickPendingIntent(R.id.app_logo, pendingIntent)
-                    views.setOnClickPendingIntent(R.id.habit_title, pendingIntent)
+                    views.setOnClickPendingIntent(R.id.habit_title, detailPendingIntent)
+                    views.setOnClickPendingIntent(R.id.app_logo, detailPendingIntent)
                 }
             } catch (e: Exception) {
                 Log.e("HabitControlWidget", "Error updating widget", e)
+                views.setTextViewText(R.id.habit_title, "WIDGET ERROR")
             }
             
             appWidgetManager.updateAppWidget(appWidgetId, views)

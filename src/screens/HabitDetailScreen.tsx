@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, TouchableOpacity, ScrollView, Animated, Dimensions, Vibration, Modal } from 'react-native';
+import { View, TouchableOpacity, ScrollView, Animated, Dimensions, Vibration, Modal, NativeModules } from 'react-native';
+const { WidgetBridge } = NativeModules;
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ArrowLeft, Play, Pause, RotateCcw, Flame, Trophy, Settings, Trash2, Check, X, Plus, Sparkles, Activity } from 'lucide-react-native';
+import { ArrowLeft, Play, Pause, RotateCcw, Flame, Trophy, Settings, Trash2, Check, X, Plus, Sparkles, Activity, Pin } from 'lucide-react-native';
 import { HabitDetailScreenStyles as styles } from '../styles/Habit.styles';
 import dayjs from 'dayjs';
 import { useTheme } from '../theme';
@@ -156,7 +157,10 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
         return (
             <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
                 <View style={[styles.header, { marginBottom: 20 }]}>
-                    <TouchableOpacity onPress={() => navigation.goBack()} style={[styles.backBtn, { backgroundColor: theme.colors.surface1 }]}>
+                    <TouchableOpacity
+                        onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.navigate('Main')}
+                        style={[styles.backBtn, { backgroundColor: theme.colors.surface1 }]}
+                    >
                         <ArrowLeft size={20} color={theme.colors.text} />
                     </TouchableOpacity>
                     <View style={{ flex: 1 }} />
@@ -286,7 +290,10 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+                <TouchableOpacity
+                    onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.navigate('Main')}
+                    style={styles.backBtn}
+                >
                     <ArrowLeft color={theme.colors.text} size={24} />
                 </TouchableOpacity>
                 <NothingText variant="bold" style={{ fontFamily: 'ndot' }} size={24}>{habit.title.toUpperCase()}</NothingText>
@@ -575,6 +582,17 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
                             label="Save Changes"
                             onPress={handleSaveSettings}
                             style={{ marginTop: 24 }}
+                        />
+
+                        <NothingButton
+                            label="Pin to Widget"
+                            onPress={() => {
+                                if (WidgetBridge && typeof WidgetBridge.pinHabit === 'function') {
+                                    WidgetBridge.pinHabit(habitId, habit.title);
+                                    setShowSettings(false);
+                                }
+                            }}
+                            style={{ marginTop: 12 }}
                         />
 
                         <TouchableOpacity

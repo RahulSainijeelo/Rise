@@ -105,55 +105,67 @@ class TaskTimerWidget : AppWidgetProvider() {
                 views.setOnClickPendingIntent(R.id.timer_content, pendingIntent)
             } else {
                 try {
-                    val timerData = JSONObject(timerDataStr)
-                    val title = timerData.optString("title", "Task")
-                    val timeLeft = timerData.optInt("timeLeft", 0)
-                    val isRunning = timerData.optBoolean("isRunning", false)
-                    val id = timerData.optString("id", "")
+                    val timerData = if (timerDataStr == null || timerDataStr == "null") null else JSONObject(timerDataStr)
+                    
+                    if (timerData == null) {
+                        views.setViewVisibility(R.id.timer_content, View.VISIBLE)
+                        views.setTextViewText(R.id.timer_display, "--:--")
+                        views.setTextViewText(R.id.timer_task_name, "No Active Task")
+                        views.setViewVisibility(R.id.timer_play_pause, View.GONE)
+                        views.setViewVisibility(R.id.timer_stop, View.GONE)
+                        
+                        val intent = Intent(context, MainActivity::class.java)
+                        val pendingIntent = PendingIntent.getActivity(context, 250 + appWidgetId, intent, 
+                            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                        views.setOnClickPendingIntent(R.id.timer_content, pendingIntent)
+                    } else {
+                        val title = timerData.optString("title", "Task")
+                        val timeLeft = timerData.optInt("timeLeft", 0)
+                        val isRunning = timerData.optBoolean("isRunning", false)
+                        val id = timerData.optString("id", "")
 
-                    views.setViewVisibility(R.id.timer_play_pause, View.VISIBLE)
-                    views.setViewVisibility(R.id.timer_stop, View.VISIBLE)
-                    
-                    val minutes = timeLeft / 60
-                    val seconds = timeLeft % 60
-                    views.setTextViewText(R.id.timer_display, String.format("%02d:%02d", minutes, seconds))
-                    views.setTextViewText(R.id.timer_task_name, title)
-                    
-                    views.setTextViewText(R.id.timer_play_pause, if (isRunning) "PAUSE" else "RESUME")
-                    
-                    // Play/Pause button
-                    val action = if (isRunning) "pause" else "resume"
-                    val pauseIntent = Intent(context, MainActivity::class.java).apply {
-                        this.action = Intent.ACTION_VIEW
-                        data = Uri.parse("rise://timer-action/$action/$id")
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                        views.setViewVisibility(R.id.timer_play_pause, View.VISIBLE)
+                        views.setViewVisibility(R.id.timer_stop, View.VISIBLE)
+                        
+                        val minutes = timeLeft / 60
+                        val seconds = timeLeft % 60
+                        views.setTextViewText(R.id.timer_display, String.format("%02d:%02d", minutes, seconds))
+                        views.setTextViewText(R.id.timer_task_name, title)
+                        
+                        views.setTextViewText(R.id.timer_play_pause, if (isRunning) "PAUSE" else "RESUME")
+                        
+                        val action = if (isRunning) "pause" else "resume"
+                        val pauseIntent = Intent(context, MainActivity::class.java).apply {
+                            this.action = Intent.ACTION_VIEW
+                            data = Uri.parse("rise://timer-action/$action/$id")
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                        }
+                        val pausePendingIntent = PendingIntent.getActivity(context, 200 + appWidgetId, pauseIntent, 
+                            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                        views.setOnClickPendingIntent(R.id.timer_play_pause, pausePendingIntent)
+                        
+                        val stopIntent = Intent(context, MainActivity::class.java).apply {
+                            this.action = Intent.ACTION_VIEW
+                            data = Uri.parse("rise://timer-action/stop/$id")
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                        }
+                        val stopPendingIntent = PendingIntent.getActivity(context, 201 + appWidgetId, stopIntent, 
+                            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                        views.setOnClickPendingIntent(R.id.timer_stop, stopPendingIntent)
+                        
+                        val detailIntent = Intent(context, MainActivity::class.java).apply {
+                            this.action = Intent.ACTION_VIEW
+                            data = Uri.parse("rise://item/$id/${timerData.optString("type", "task")}")
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                        }
+                        val detailPendingIntent = PendingIntent.getActivity(context, 202 + appWidgetId, detailIntent, 
+                            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                        views.setOnClickPendingIntent(R.id.timer_content, detailPendingIntent)
+                        views.setOnClickPendingIntent(R.id.app_logo, detailPendingIntent)
                     }
-                    val pausePendingIntent = PendingIntent.getActivity(context, 200, pauseIntent, 
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-                    views.setOnClickPendingIntent(R.id.timer_play_pause, pausePendingIntent)
-                    
-                    // Stop button
-                    val stopIntent = Intent(context, MainActivity::class.java).apply {
-                        this.action = Intent.ACTION_VIEW
-                        data = Uri.parse("rise://timer-action/stop/$id")
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                    }
-                    val stopPendingIntent = PendingIntent.getActivity(context, 201, stopIntent, 
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-                    views.setOnClickPendingIntent(R.id.timer_stop, stopPendingIntent)
-                    
-                    // Display click - open app to details
-                    val detailIntent = Intent(context, MainActivity::class.java).apply {
-                        this.action = Intent.ACTION_VIEW
-                        data = Uri.parse("rise://item/$id/${timerData.optString("type", "task")}")
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                    }
-                    val detailPendingIntent = PendingIntent.getActivity(context, 202, detailIntent, 
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-                    views.setOnClickPendingIntent(R.id.timer_content, detailPendingIntent)
-                    
                 } catch (e: Exception) {
-                    Log.e("TaskTimerWidget", "Errorparsing timer data", e)
+                    Log.e("TaskTimerWidget", "Error parsing timer data", e)
+                    views.setTextViewText(R.id.timer_display, "ERR")
                 }
             }
             

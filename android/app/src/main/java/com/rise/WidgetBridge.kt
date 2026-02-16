@@ -117,6 +117,22 @@ class WidgetBridge(reactContext: ReactApplicationContext) : ReactContextBaseJava
         }
     }
 
+    @ReactMethod
+    fun pinHabit(habitId: String, title: String) {
+        try {
+            Log.d("WidgetBridge", "Pinning habit: $habitId ($title)")
+            val sharedPref = reactApplicationContext.getSharedPreferences("RiseWidgetPrefs", Context.MODE_PRIVATE)
+            with(sharedPref.edit()) {
+                putString("pinnedHabitId", habitId)
+                putString("pinnedHabitTitle", title)
+                apply()
+            }
+            notifyWidgetUpdate()
+        } catch (e: Exception) {
+            Log.e("WidgetBridge", "Error pinning habit", e)
+        }
+    }
+
     private fun notifyWidgetUpdate() {
         val context = reactApplicationContext
         val appWidgetManager = AppWidgetManager.getInstance(context)

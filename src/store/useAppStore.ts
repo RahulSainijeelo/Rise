@@ -118,10 +118,11 @@ const DEFAULT_LABELS: Label[] = [
 
 export const useAppStore = create<AppState>((set, get) => ({
     activeProfile: null,
-    currentUser: null, // Computed getter ideally, but for now duplicate sync
+    currentUser: null,
     tasks: [],
     habits: [],
     labels: DEFAULT_LABELS,
+    activeTimer: null,
 
     login: async (profile) => {
         set({ activeProfile: profile, currentUser: profile.name });
@@ -174,10 +175,10 @@ export const useAppStore = create<AppState>((set, get) => ({
             });
             // Update widget with loaded data
             const loadedLabels = data.labels && Array.isArray(data.labels) ? data.labels : DEFAULT_LABELS;
-            WidgetService.updateWidget(tasks, habits, loadedLabels);
+            WidgetService.updateWidget(tasks, habits, loadedLabels, get().activeTimer);
         } else {
             set({ tasks: [], habits: [] });
-            WidgetService.updateWidget([], [], DEFAULT_LABELS);
+            WidgetService.updateWidget([], [], DEFAULT_LABELS, null);
         }
     },
 
@@ -192,7 +193,7 @@ export const useAppStore = create<AppState>((set, get) => ({
                 labels
             };
             await StorageService.saveUserData(activeProfile.id, dataToSave);
-            WidgetService.updateWidget(tasks, habits, labels);
+            WidgetService.updateWidget(tasks, habits, labels, get().activeTimer);
         }
     },
 
@@ -545,5 +546,51 @@ export const useAppStore = create<AppState>((set, get) => ({
             habits: state.habits.filter((h) => h.id !== id)
         }));
         get().saveData();
+    },
+
+    startTimer: (id, title, type, goal) => {
+        set({ activeTimer: { id, title, type, timeLeft: goal, goal, isRunning: true } });
+        get().saveData();
+    },
+    pauseTimer: () => {
+        set((state) => ({
+            activeTimer: state.activeTimer ? { ...state.activeTimer, isRunning: false } : null
+        }));
+        get().saveData();
+    },
+    resumeTimer: () => {
+        set((state) => ({
+            activeTimer: state.activeTimer ? { ...state.activeTimer, isRunning: true } : null
+        }));
+        get().saveData();
+    },
+    stopTimer: () => {
+        set({ activeTimer: null });
+        get().saveData();
+    },
+    tickTimer: () => {
+        set((state) => {
+            if (!state.activeTimer || !state.activeTimer.isRunning) return { habits: state.habits };
+            const nextTime = state.activeTimer.timeLeft - 1;
+            if (nextTime <= 0) {
+                SoundService.playSound('timer_end');
+                // Auto-toggle habit if it was a habit timer
+                if (state.activeTimer.type === 'habit') {
+                    const habitId = state.activeTimer.id;
+                    const today = dayjs().format('YYYY-MM-DD');
+                    const habits = state.habits.map(h => {
+                        if (h.id === habitId && !h.completedDates.includes(today)) {
+                            return { ...h, completedDates: [...h.completedDates, today] };
+                        }
+                        return h;
+                    });
+                    return { activeTimer: null, habits };
+                }
+                return { activeTimer: null };
+            }
+            const updatedTimer = { ...state.activeTimer, timeLeft: nextTime };
+            WidgetService.updateWidget(state.tasks, state.habits, state.labels, updatedTimer);
+            return { activeTimer: updatedTimer };
+        });
     },
 }));

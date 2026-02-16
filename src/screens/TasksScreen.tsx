@@ -64,6 +64,8 @@ export const TasksScreen = () => {
         handleUpdateTaskLabel,
         handleUpdateTaskDate,
         handleUpdateTaskTime,
+        handleUpdateTaskDuration,
+        handleUpdateTaskReminders,
         handleOpenAddModal,
         newLabel, setNewLabel: setNewLabelProp,
         addLabel,
@@ -284,8 +286,14 @@ export const TasksScreen = () => {
                 onClose={() => setShowDurationModal(false)}
                 theme={theme}
                 insets={insets}
-                duration={duration}
-                setDuration={setDuration}
+                duration={isDetailModalVisible && activeTask ? activeTask.duration || 0 : duration}
+                setDuration={(d) => {
+                    if (isDetailModalVisible && activeTask) {
+                        handleUpdateTaskDuration(activeTask.id, d);
+                    } else {
+                        setDuration(d);
+                    }
+                }}
             />
 
             <RemindersModal
@@ -293,8 +301,14 @@ export const TasksScreen = () => {
                 onClose={() => setShowRemindersModal(false)}
                 theme={theme}
                 insets={insets}
-                selectedReminders={selectedReminders}
-                setSelectedReminders={setSelectedReminders}
+                selectedReminders={isDetailModalVisible && activeTask ? activeTask.reminders : selectedReminders}
+                setSelectedReminders={(r) => {
+                    if (isDetailModalVisible && activeTask) {
+                        handleUpdateTaskReminders(activeTask.id, r);
+                    } else {
+                        setSelectedReminders(r);
+                    }
+                }}
             />
 
             <LabelPickerModal
@@ -334,7 +348,7 @@ export const TasksScreen = () => {
             )}
 
             <TaskDetailModal
-                visible={isDetailModalVisible && !showAdvDateModal && !showAdvTimeModal && !showLabelPicker}
+                visible={isDetailModalVisible && !showAdvDateModal && !showAdvTimeModal && !showLabelPicker && !showDurationModal && !showRemindersModal}
                 onClose={() => setIsDetailModalVisible(false)}
                 theme={theme}
                 insets={insets}
@@ -343,8 +357,18 @@ export const TasksScreen = () => {
                 onToggleSubtask={handleToggleSubtask}
                 onDeleteSubtask={handleDeleteSubtask}
                 onUpdatePriority={handleUpdateTaskPriority}
-                onUpdateLabel={() => setShowLabelPicker(true)}
-                onUpdateDate={() => setShowAdvDateModal(true)}
+                onUpdateLabel={(taskId) => {
+                    if (activeTask && activeTask.id === taskId) {
+                        setShowLabelPicker(true);
+                    }
+                }}
+                onUpdateDate={(id, type) => {
+                    if (type === 'duration') {
+                        setShowDurationModal(true);
+                    } else {
+                        setShowAdvDateModal(true);
+                    }
+                }}
                 getPriorityColor={getPriorityColor}
             />
 

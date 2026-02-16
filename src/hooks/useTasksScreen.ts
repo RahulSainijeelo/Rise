@@ -231,6 +231,14 @@ export const useTasksScreen = () => {
         useAppStore.getState().updateTask(taskId, { dueTime: time });
     };
 
+    const handleUpdateTaskDuration = (taskId: string, duration: number | null) => {
+        useAppStore.getState().updateTask(taskId, { duration: duration || undefined });
+    };
+
+    const handleUpdateTaskReminders = (taskId: string, reminders: string[]) => {
+        useAppStore.getState().updateTask(taskId, { reminders });
+    };
+
     return {
         activeTab, setActiveTab,
         isAddModalVisible, setIsAddModalVisible,
@@ -275,5 +283,7 @@ export const useTasksScreen = () => {
         handleUpdateTaskLabel,
         handleUpdateTaskDate,
         handleUpdateTaskTime,
+        handleUpdateTaskDuration,
+        handleUpdateTaskReminders,
     };
 };

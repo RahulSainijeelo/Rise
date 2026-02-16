@@ -3,6 +3,8 @@ import dayjs from 'dayjs';
 import { StorageService } from '../services/StorageService';
 import { WidgetService } from '../services/WidgetService';
 import { notificationService } from '../services/NotificationService';
+import { SoundService } from '../services/SoundService';
+import { SettingsService } from '../services/SettingsService';
 
 export interface Task {
     id: string;
@@ -216,15 +218,22 @@ export const useAppStore = create<AppState>((set, get) => ({
     },
 
     toggleTask: (id) => {
-        set((state) => ({
-            tasks: state.tasks.map((t) => t.id === id ? { ...t, completed: !t.completed } : t)
-        }));
+        set((state) => {
+            const task = state.tasks.find(t => t.id === id);
+            if (task && !task.completed) {
+                SoundService.playSound('complete');
+            }
+            return {
+                tasks: state.tasks.map((t) => t.id === id ? { ...t, completed: !t.completed } : t)
+            };
+        });
         get().saveData();
     },
 
     deleteTask: (id) => {
         // Cancel reminders before deleting
         notificationService.cancelTaskReminders(id);
+        SoundService.playSound('delete');
 
         set((state) => ({
             tasks: state.tasks.filter((t) => t.id !== id)
@@ -302,7 +311,26 @@ export const useAppStore = create<AppState>((set, get) => ({
                         }
                     }
 
-                    const bestStreak = Math.max(h.bestStreak || 0, streak);
+                    // For best streak: Recalculate based on full history to handle undo cases
+                    let bestStreak = 0;
+                    if (sortedDates.length > 0) {
+                        let currentCount = 1;
+                        bestStreak = 1;
+                        for (let i = 0; i < sortedDates.length - 1; i++) {
+                            const curr = dayjs(sortedDates[i]);
+                            const next = dayjs(sortedDates[i + 1]);
+                            if (curr.subtract(1, 'day').format('YYYY-MM-DD') === next.format('YYYY-MM-DD')) {
+                                currentCount++;
+                                bestStreak = Math.max(bestStreak, currentCount);
+                            } else {
+                                currentCount = 1;
+                            }
+                        }
+                    }
+
+                    if (!isCompleted) {
+                        SoundService.playSound('complete');
+                    }
 
                     return { ...h, completedDates: newCompletedDates, streak, bestStreak };
                 }
@@ -493,8 +521,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     },
 
     deleteHabit: (id) => {
-        // Cancel reminders before deleting
+        // Cancel first
         notificationService.cancelHabitReminders(id);
+        SoundService.playSound('delete');
 
         set((state) => ({
             habits: state.habits.filter((h) => h.id !== id)

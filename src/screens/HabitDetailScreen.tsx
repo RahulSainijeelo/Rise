@@ -9,7 +9,9 @@ import { NothingText } from '../components/NothingText';
 import { NothingCard } from '../components/NothingCard';
 import { NothingButton } from '../components/NothingButton';
 import { NothingInput } from '../components/NothingInput';
+import { ConfirmationModal } from '../components/ConfirmationModal';
 import { useAppStore } from '../store/useAppStore';
+import { SoundService } from '../services/SoundService';
 const { width } = Dimensions.get('window');
 const CIRCLE_SIZE = width * 0.7;
 
@@ -26,6 +28,7 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
     const [showSettings, setShowSettings] = useState(false);
     const [editTitle, setEditTitle] = useState(habit?.title || '');
     const [editGoal, setEditGoal] = useState(((habit?.timerGoal || 0) / 60).toString());
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
     // Sensor State
     const [liveData, setLiveData] = useState({
@@ -131,7 +134,7 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
                 setTimeLeft(prev => {
                     if (prev <= 1) {
                         setIsTimerRunning(false);
-                        Vibration.vibrate([0, 500, 200, 500]);
+                        SoundService.playSound('timer_end');
                         if (habit && !habit.completedDates.includes(today)) {
                             toggleHabit(habitId, today);
                         }
@@ -496,12 +499,21 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
                         {Array.from({ length: 35 }).map((_, i) => {
                             const date = dayjs().subtract(34 - i, 'day').format('YYYY-MM-DD');
                             const active = habit.completedDates.includes(date);
+                            const isPast = dayjs(date).isBefore(dayjs(), 'day');
+                            const missed = isPast && !active;
                             return (
                                 <View
                                     key={i}
                                     style={[
                                         styles.heatDot,
-                                        { backgroundColor: active ? theme.colors.text : theme.colors.surface2 }
+                                        {
+                                            backgroundColor: active
+                                                ? theme.colors.text
+                                                : missed
+                                                    ? theme.colors.error
+                                                    : theme.colors.surface2,
+                                            opacity: active ? 1 : missed ? 0.3 : 0.5
+                                        }
                                     ]}
                                 />
                             );
@@ -511,10 +523,7 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
 
                 <TouchableOpacity
                     style={styles.deleteBtn}
-                    onPress={() => {
-                        deleteHabit(habitId);
-                        navigation.goBack();
-                    }}
+                    onPress={() => setShowDeleteConfirm(true)}
                 >
                     <Trash2 size={20} color={theme.colors.error} />
                     <NothingText color={theme.colors.error} style={{ marginLeft: 8 }}>Delete Habit</NothingText>
@@ -572,8 +581,7 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
                             style={[styles.deleteBtn, { marginTop: 24 }]}
                             onPress={() => {
                                 setShowSettings(false);
-                                deleteHabit(habitId);
-                                navigation.goBack();
+                                setShowDeleteConfirm(true);
                             }}
                         >
                             <Trash2 size={18} color={theme.colors.error} />
@@ -582,6 +590,19 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
                     </NothingCard>
                 </TouchableOpacity>
             </Modal>
+
+            <ConfirmationModal
+                visible={showDeleteConfirm}
+                title="DELETE HABIT"
+                message={`Are you sure you want to delete "${habit.title}"? This action cannot be undone.`}
+                type="danger"
+                onConfirm={() => {
+                    setShowDeleteConfirm(false);
+                    deleteHabit(habitId);
+                    navigation.goBack();
+                }}
+                onCancel={() => setShowDeleteConfirm(false)}
+            />
         </SafeAreaView>
     );
 };

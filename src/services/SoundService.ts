@@ -1,7 +1,7 @@
 import SoundPlayer from 'react-native-sound-player';
 
 export const SoundService = {
-    playSound: (type: 'complete' | 'delete' | 'timer_end') => {
+    playSound: (type: 'complete' | 'delete' | 'error' | 'timer_end') => {
         try {
             // Note: These files need to be added to android/app/src/main/res/raw
             // and ios/Rise/Resources
@@ -11,6 +11,9 @@ export const SoundService = {
                     break;
                 case 'delete':
                     SoundPlayer.playSoundFile('delete', 'mp3');
+                    break;
+                case 'error':
+                    SoundPlayer.playSoundFile('error', 'mp3');
                     break;
                 case 'timer_end':
                     SoundPlayer.playSoundFile('timer_end', 'mp3');

@@ -97,6 +97,27 @@ class SensorForegroundService : Service(), SensorEventListener {
         private const val STEP_THRESHOLD = 14.5
         private const val STEP_COOLDOWN_MS = 400L
 
+        // -- Distance -------------------------------------------------------
+        // Kept in step with the same three constants in src/services/SensorService.ts,
+        // so a commute measures the same whether the app is open or closed.
+
+        /** How often to ask the provider for a fix. */
+        private const val LOCATION_MIN_MS = 2_000L
+
+        /** Fixes worse than this are guesses, not positions. */
+        private const val ACCURACY_LIMIT_M = 40f
+
+        /**
+         * Shortest movement counted as movement.
+         *
+         * A stationary phone's fixes wander by a few metres, and with no lower bound
+         * that wander accumulates into a walk nobody took.
+         */
+        private const val MIN_SEGMENT_M = 8f
+
+        /** ~144 km/h: above this the fix jumped rather than the person moving. */
+        private const val MAX_SPEED_MPS = 40.0
+
         private const val EXTRA_CONFIG = "extra_config"
 
         /**
@@ -207,6 +228,7 @@ class SensorForegroundService : Service(), SensorEventListener {
 
     private var sensorManager: SensorManager? = null
     private var stepSensor: Sensor? = null
+    private var stepDetectorSensor: Sensor? = null
     private var accelSensor: Sensor? = null
     private var locationManager: LocationManager? = null
 
@@ -220,6 +242,15 @@ class SensorForegroundService : Service(), SensorEventListener {
      */
     private var stepCarry = 0
     private var usingHardwareSteps = false
+    /**
+     * Steps reported by TYPE_STEP_DETECTOR since the last TYPE_STEP_COUNTER event.
+     *
+     * The counter is the truth but it batches: hardware may sit on five or ten steps
+     * and deliver them in one burst, which is exactly the "steps are adding randomly"
+     * the user saw. The detector fires once per step with no batching, so it carries
+     * the number between counter events and is zeroed each time the counter catches up.
+     */
+    private var detectorDelta = 0
     /** Cosmetic 0-100 movement intensity from the accelerometer. */
     private var activity = 0
     private var accelWasAbove = false
@@ -227,6 +258,8 @@ class SensorForegroundService : Service(), SensorEventListener {
 
     private var distanceMeters = 0.0
     private var lastLocation: Location? = null
+    /** Wall clock of the anchor fix, for the implied-speed sanity check. */
+    private var lastFixMs = 0L
 
     private var currentDb = 0
     private var noiseSeconds = 0
@@ -362,6 +395,10 @@ class SensorForegroundService : Service(), SensorEventListener {
         } catch (e: Exception) { }
         stopLocation()
         stopNoise()
+        // Quitting and pausing everything both land here without going through
+        // applyConfig, so this is the other place today's step ledger has to be closed
+        // or the hardware counter hands back every step walked while we were off.
+        bankSteps()
         if (receiverRegistered) {
             try {
                 unregisterReceiver(userPresentReceiver)
@@ -592,13 +629,30 @@ class SensorForegroundService : Service(), SensorEventListener {
             sm?.unregisterListener(this)
         } catch (e: Exception) { }
         stepSensor = null
+        stepDetectorSensor = null
         accelSensor = null
 
         if (wantsSteps() && sm != null) {
             stepSensor = sm.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
             if (stepSensor != null) {
                 usingHardwareSteps = true
-                sm.registerListener(this, stepSensor, SensorManager.SENSOR_DELAY_NORMAL)
+                /*
+                 * SENSOR_DELAY_FASTEST with a zero maximum report latency, which is the
+                 * part that matters: TYPE_STEP_COUNTER only produces an event when the
+                 * count changes, but it is a batching sensor, and a non-zero latency
+                 * lets the hardware hold a handful of steps back and deliver them in
+                 * one jump. Zero latency asks for each change as it happens.
+                 */
+                sm.registerListener(
+                    this, stepSensor, SensorManager.SENSOR_DELAY_FASTEST, 0
+                )
+                // The detector is what makes the number move in real time. Some
+                // devices still coalesce the counter no matter what latency is asked
+                // for; the detector fires once per step and cannot be batched away.
+                stepDetectorSensor = sm.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)
+                stepDetectorSensor?.let {
+                    sm.registerListener(this, it, SensorManager.SENSOR_DELAY_FASTEST, 0)
+                }
             } else {
                 // No pedometer hardware: fall back to the accelerometer heuristic,
                 // and say so on the widget via stepNote().
@@ -606,6 +660,10 @@ class SensorForegroundService : Service(), SensorEventListener {
                 accelSensor = sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
                 accelSensor?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
             }
+        } else {
+            // Steps are not being tracked from here on, so close the books: see
+            // bankSteps().
+            bankSteps()
         }
 
         if (wantsLocation()) startLocation() else stopLocation()
@@ -637,6 +695,7 @@ class SensorForegroundService : Service(), SensorEventListener {
             // Force re-baselining on the next TYPE_STEP_COUNTER event.
             steps = 0
             stepCarry = 0
+            detectorDelta = 0
             p.edit()
                 .putString(WidgetContract.KEY_STEP_DATE, today)
                 .putLong(WidgetContract.KEY_STEP_BASELINE, -1L)
@@ -703,8 +762,51 @@ class SensorForegroundService : Service(), SensorEventListener {
         event ?: return
         when (event.sensor.type) {
             Sensor.TYPE_STEP_COUNTER -> handleStepCounter(event.values[0].toLong())
+            Sensor.TYPE_STEP_DETECTOR -> handleStepDetector()
             Sensor.TYPE_ACCELEROMETER -> handleAccelerometer(event)
         }
+    }
+
+    /**
+     * Close today's step ledger and force a re-baseline on the next reading.
+     *
+     * TYPE_STEP_COUNTER counts in hardware whether or not anybody is listening, so
+     * unregistering the listener does not stop it: on resume, (reading − baseline)
+     * would silently include every step walked while tracking was off. Banking the
+     * total we had and clearing the baseline is what makes a pause mean "these steps
+     * do not count" rather than "you will be given them back later".
+     */
+    private fun bankSteps() {
+        val p = WidgetContract.prefs(this)
+        // Already banked (or never baselined): nothing to close.
+        if (p.getLong(WidgetContract.KEY_STEP_BASELINE, -1L) < 0L && detectorDelta == 0) return
+        stepCarry = max(stepCarry, steps)
+        detectorDelta = 0
+        p.edit()
+            .putLong(WidgetContract.KEY_STEP_BASELINE, -1L)
+            .putInt(WidgetContract.KEY_STEP_CARRY, stepCarry)
+            .apply()
+    }
+
+    /**
+     * One step, the moment it happens.
+     *
+     * TYPE_STEP_DETECTOR has no total of its own — every event means "+1" — so this is
+     * an estimate riding on top of the last counter reading, discarded the instant the
+     * counter reports. It exists because the counter batches: without it the number
+     * arrives in lumps of five or ten, which is not what "real time" looks like.
+     */
+    private fun handleStepDetector() {
+        rollDayIfNeeded()
+        // The event may have been queued before a pause landed. A paused habit must
+        // not gain steps, which is the whole point of the pause.
+        if (!wantsSteps()) return
+        detectorDelta += 1
+        steps += 1
+        // Every fifth step, not every step: the publish below already writes the
+        // runtime overlay the widgets read, and this is only the crash-recovery copy.
+        if (detectorDelta % 5 == 0) persistCounters()
+        publishThrottled()
     }
 
     private fun handleStepCounter(reading: Long) {
@@ -729,6 +831,11 @@ class SensorForegroundService : Service(), SensorEventListener {
         }
 
         val next = (stepCarry + (reading - baseline)).toInt()
+        // The counter is authoritative, so it also cancels the detector's estimate.
+        // Keeping the larger of the two makes the number monotonic: a counter that
+        // reports slightly behind the detector would otherwise count backwards, which
+        // reads as a bug even when the total is right.
+        detectorDelta = 0
         if (next > steps) {
             steps = next
             persistCounters()
@@ -762,24 +869,44 @@ class SensorForegroundService : Service(), SensorEventListener {
 
     private val locationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
-            // Same filters as the JS path: ignore imprecise fixes and standing
-            // still, which are what made the distance number drift upward while the
-            // phone sat motionless on a table.
-            if (location.hasAccuracy() && location.accuracy > 20f) return
-            if (location.hasSpeed() && location.speed < 0.3f) return
+            /*
+             * Filtering, rewritten. The old version rejected any fix reporting a speed
+             * below 0.3 m/s, which is why the metre count never moved: a great many
+             * devices report speed 0.0 on every fix — the field is only filled in when
+             * the chipset has a Doppler solution — so walking looked identical to
+             * sitting still and every fix was thrown away.
+             *
+             * What replaces it is geometric. Standing still shows up as jitter of a few
+             * metres around one point, so a minimum segment length rejects it without
+             * needing to trust a speed field; a bad fix shows up as a jump, so an
+             * implied speed ceiling rejects that.
+             */
+            if (location.hasAccuracy() && location.accuracy > ACCURACY_LIMIT_M) return
 
+            val now = System.currentTimeMillis()
             val prev = lastLocation
-            if (prev == null) {
+            // Re-anchor without accruing when the provider changes: two providers
+            // disagreeing by 30m is not 30m walked.
+            if (prev == null || prev.provider != location.provider) {
                 lastLocation = location
+                lastFixMs = now
                 return
             }
+
             val delta = prev.distanceTo(location)
-            if (delta > 5f) {
-                distanceMeters += delta
-                lastLocation = location
-                persistCounters()
-                publishThrottled()
+            if (delta < MIN_SEGMENT_M) return
+
+            val seconds = (now - lastFixMs) / 1000.0
+            if (seconds > 0.5 && delta / seconds > MAX_SPEED_MPS) {
+                // Implausible jump: keep the old anchor and wait for a sane fix.
+                return
             }
+
+            distanceMeters += delta
+            lastLocation = location
+            lastFixMs = now
+            persistCounters()
+            publishThrottled()
         }
 
         @Deprecated("Required by the pre-30 LocationListener interface")
@@ -788,15 +915,48 @@ class SensorForegroundService : Service(), SensorEventListener {
         override fun onProviderDisabled(provider: String) { }
     }
 
+    /**
+     * Which provider to ask, in preference order.
+     *
+     * Exactly one is used, on purpose. Registering two and accruing from whichever
+     * answers would either double-count the same walk or, with the provider-change
+     * guard above, re-anchor on every alternating fix and accrue nothing at all.
+     */
+    private fun pickLocationProvider(lm: LocationManager): String? {
+        val candidates = ArrayList<String>(3)
+        candidates.add(LocationManager.GPS_PROVIDER)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            candidates.add(LocationManager.FUSED_PROVIDER)
+        }
+        candidates.add(LocationManager.NETWORK_PROVIDER)
+        for (p in candidates) {
+            val enabled = try {
+                lm.isProviderEnabled(p)
+            } catch (e: Exception) {
+                false
+            }
+            if (enabled) return p
+        }
+        return null
+    }
+
     private fun startLocation() {
         if (!hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)) {
             Log.w(TAG, "Distance habit linked but location permission not granted")
             return
         }
+        val lm = locationManager ?: return
+        val provider = pickLocationProvider(lm)
+        if (provider == null) {
+            Log.w(TAG, "Distance habit linked but every location provider is disabled")
+            return
+        }
         try {
-            locationManager?.requestLocationUpdates(
-                LocationManager.GPS_PROVIDER, 5_000L, 5f, locationListener
-            )
+            // minDistance stays 0: the provider's own displacement filter measures from
+            // the last fix it delivered, not from our anchor, so it would silently
+            // swallow the movement between a rejected fix and the next good one. All
+            // filtering happens in one place, above.
+            lm.requestLocationUpdates(provider, LOCATION_MIN_MS, 0f, locationListener)
         } catch (e: Exception) {
             Log.w(TAG, "Could not start location updates", e)
         }
@@ -807,6 +967,7 @@ class SensorForegroundService : Service(), SensorEventListener {
             locationManager?.removeUpdates(locationListener)
         } catch (e: Exception) { }
         lastLocation = null
+        lastFixMs = 0L
     }
 
     // -----------------------------------------------------------------------

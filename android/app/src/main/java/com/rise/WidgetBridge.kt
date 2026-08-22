@@ -4,6 +4,7 @@ import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
@@ -168,6 +169,123 @@ class WidgetBridge(reactContext: ReactApplicationContext) : ReactContextBaseJava
             Log.e("WidgetBridge", "Error pinning habit", e)
         }
     }
+
+    // -----------------------------------------------------------------------
+    // Focus timer
+    // -----------------------------------------------------------------------
+    //
+    // The app tab is a second face on the same timer, not a timer of its own. Every
+    // one of these calls goes through FocusTimer, which is also what the widget's
+    // buttons and the notification actions go through, so a session started on the
+    // home screen can be paused in the app and the history has one writer.
+    //
+    // Each resolves with the state as JSON, so the screen can render the result of its
+    // own action without a second round trip.
+
+    @ReactMethod
+    fun getFocusState(promise: Promise) {
+        try {
+            promise.resolve(FocusTimer.read(reactApplicationContext).json().toString())
+        } catch (e: Exception) {
+            promise.reject("focus_state", e)
+        }
+    }
+
+    /** One of the WidgetContract.FOCUS_OP_* values. */
+    @ReactMethod
+    fun focusOp(op: String, promise: Promise) {
+        try {
+            val state = FocusTimer.handle(
+                reactApplicationContext, op, WidgetContract.FOCUS_SOURCE_APP
+            )
+            FocusTimer.refreshWidgets(reactApplicationContext)
+            promise.resolve(state.json().toString())
+        } catch (e: Exception) {
+            promise.reject("focus_op", e)
+        }
+    }
+
+    /** Dial in a duration and start it, in one step, as the app's picker does. */
+    @ReactMethod
+    fun focusStart(hours: Int, minutes: Int, promise: Promise) {
+        try {
+            FocusTimer.setDial(reactApplicationContext, hours, minutes)
+            val state = FocusTimer.handle(
+                reactApplicationContext,
+                WidgetContract.FOCUS_OP_START,
+                WidgetContract.FOCUS_SOURCE_APP
+            )
+            FocusTimer.refreshWidgets(reactApplicationContext)
+            promise.resolve(state.json().toString())
+        } catch (e: Exception) {
+            promise.reject("focus_start", e)
+        }
+    }
+
+    /** Remember the dial without starting, so the app and the widget agree on it. */
+    @ReactMethod
+    fun setFocusDial(hours: Int, minutes: Int, promise: Promise) {
+        try {
+            val state = FocusTimer.setDial(reactApplicationContext, hours, minutes)
+            FocusTimer.refreshWidgets(reactApplicationContext)
+            promise.resolve(state.json().toString())
+        } catch (e: Exception) {
+            promise.reject("focus_dial", e)
+        }
+    }
+
+    @ReactMethod
+    fun getFocusHistory(promise: Promise) {
+        try {
+            promise.resolve(FocusTimer.historyJson(reactApplicationContext))
+        } catch (e: Exception) {
+            promise.reject("focus_history", e)
+        }
+    }
+
+    @ReactMethod
+    fun clearFocusHistory(promise: Promise) {
+        try {
+            FocusTimer.clearHistory(reactApplicationContext)
+            FocusTimer.refreshWidgets(reactApplicationContext)
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("focus_history_clear", e)
+        }
+    }
+
+    @ReactMethod
+    fun setFocusTheme(json: String, promise: Promise) {
+        try {
+            FocusTimer.setTheme(reactApplicationContext, json)
+            // Immediately, so the ring on the home screen changes colour with the one
+            // in the app rather than at the next tick.
+            FocusTimer.refreshWidgets(reactApplicationContext)
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("focus_theme", e)
+        }
+    }
+
+    @ReactMethod
+    fun getFocusTheme(promise: Promise) {
+        try {
+            val t = FocusTimer.theme(reactApplicationContext)
+            promise.resolve(
+                JSONObject().apply {
+                    put(WidgetContract.FOCUS_T_ID, t.id)
+                    put(WidgetContract.FOCUS_T_FROM, hex(t.from))
+                    put(WidgetContract.FOCUS_T_TO, hex(t.to))
+                    put(WidgetContract.FOCUS_T_TRACK, hex(t.track))
+                }.toString()
+            )
+        } catch (e: Exception) {
+            promise.reject("focus_theme_get", e)
+        }
+    }
+
+    private fun hex(color: Int): String =
+        String.format("#%06X", 0xFFFFFF and color)
 
     private fun notifyWidgetUpdate() {
         try {

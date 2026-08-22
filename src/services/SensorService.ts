@@ -19,6 +19,21 @@ const hasNativeService = Platform.OS === 'android' && !!SensorBridge;
 
 setUpdateIntervalForType(SensorTypes.accelerometer, 100);
 
+/*
+ * Distance filtering, kept in step with the same three constants in
+ * SensorForegroundService.kt so a commute measures the same with the app open and
+ * closed. See startLocationTracking for why a speed filter is not among them.
+ */
+
+/** Fixes worse than this are guesses, not positions. */
+const ACCURACY_LIMIT_M = 40;
+
+/** Shortest movement counted as movement; below it, GPS is only wandering. */
+const MIN_SEGMENT_M = 8;
+
+/** ~144 km/h: above this the fix jumped rather than the person moving. */
+const MAX_SPEED_MPS = 40;
+
 /**
  * Local calendar date, YYYY-MM-DD.
  *
@@ -601,22 +616,31 @@ class SensorService {
         this.stepCount = 0;
     }
 
-    // GPS Tracking - STRICT mode to prevent table drift
+    /**
+     * GPS tracking for the in-app path.
+     *
+     * The filters mirror SensorForegroundService's locationListener — same accuracy
+     * limit, same minimum segment, same implied-speed ceiling — because a commute has
+     * to measure the same whether the app is open or closed. What is deliberately gone
+     * is the old speed test: plenty of devices report speed 0 on every fix (the field
+     * is only filled in when the chipset has a Doppler solution), so "ignore anything
+     * slower than 0.3 m/s" threw away every fix and the metre count never moved.
+     * Standing still is now rejected geometrically instead, by MIN_SEGMENT_M.
+     */
     startLocationTracking(initialDistance: number, onData: (lat: number, lng: number, distance: number) => void) {
         if (!Geolocation) {
             console.warn("Geolocation module not found");
             return;
         }
         this.totalDistance = initialDistance;
+        let lastFixAt = 0;
         Geolocation.watchPosition(
             (position) => {
-                const { latitude, longitude, accuracy, speed } = position.coords;
+                const { latitude, longitude, accuracy } = position.coords;
+                const now = position.timestamp || Date.now();
 
-                // STRICT: Only accept high accuracy GPS readings (< 20m)
-                if (accuracy > 20) return;
-
-                // STRICT: Ignore if speed is essentially zero (stationary)
-                if (speed !== null && speed < 0.3) return; // less than 1 km/h
+                // A fix this imprecise is a guess, not a position.
+                if (typeof accuracy === 'number' && accuracy > ACCURACY_LIMIT_M) return;
 
                 if (this.lastPosition) {
                     const d = this.calculateDistance(
@@ -626,13 +650,21 @@ class SensorService {
                         longitude
                     );
 
-                    // STRICT: Only add if movement is greater than 5 meters
-                    if (d > 5) {
-                        this.totalDistance += d;
-                        this.lastPosition = { latitude, longitude };
+                    // Below the noise floor the anchor is kept, so slow movement
+                    // accumulates into one accepted segment instead of being discarded
+                    // a metre at a time.
+                    if (d >= MIN_SEGMENT_M) {
+                        const seconds = (now - lastFixAt) / 1000;
+                        const plausible = !(lastFixAt && seconds > 0.5 && d / seconds > MAX_SPEED_MPS);
+                        if (plausible) {
+                            this.totalDistance += d;
+                            this.lastPosition = { latitude, longitude };
+                            lastFixAt = now;
+                        }
                     }
                 } else {
                     this.lastPosition = { latitude, longitude };
+                    lastFixAt = now;
                 }
 
                 onData(latitude, longitude, this.totalDistance);
@@ -640,9 +672,13 @@ class SensorService {
             (error) => console.log(error),
             {
                 enableHighAccuracy: true,
-                distanceFilter: 5, // Only trigger after 5m movement
-                interval: 5000,
-                fastestInterval: 3000
+                // Filtering happens above, in one place: the platform's own
+                // displacement filter measures from the last fix it delivered, not
+                // from our anchor, so it swallows movement between a rejected fix and
+                // the next good one.
+                distanceFilter: 0,
+                interval: 2000,
+                fastestInterval: 1000
             }
         );
     }

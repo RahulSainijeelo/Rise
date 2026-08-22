@@ -7,10 +7,16 @@
   than the dot it contains and so it is the only clickable cell in the row — a whole
   row that toggled would mark habits done while somebody was scrolling.
 
-  Every dot is a bare View coloured with setInt(id, "setBackgroundColor", …), which
-  is one of the few background calls that is actually @RemotableViewMethod. The
-  colours below are only placeholders for the layout preview; the provider sets all
-  of them on every draw.
+  Every dot is an ImageView, not a bare View, and that is not cosmetic. RemoteViews
+  inflates with a LayoutInflater.Filter that only admits classes carrying the
+  @RemoteView annotation, and android.view.View does not carry it: a bare <View>
+  throws "Class not allowed to be inflated" at apply() time, which the host renders as
+  "Couldn't add widget" — once per row, since every row is the same layout. ImageView
+  is annotated and its setBackgroundColor behaves identically, so the dots are drawn
+  the same way, with setInt(id, "setBackgroundColor", …).
+
+  The colours below are only placeholders for the layout preview; the provider sets
+  every one of them on every draw.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
@@ -33,46 +39,52 @@
         android:textSize="10sp"
         android:textStyle="bold" />
 
-    <View
+    <ImageView
         android:id="@+id/matrix_d0"
         android:layout_width="8dp"
         android:layout_height="8dp"
         android:layout_marginStart="3dp"
+        android:importantForAccessibility="no"
         android:background="#2E2E2E" />
 
-    <View
+    <ImageView
         android:id="@+id/matrix_d1"
         android:layout_width="8dp"
         android:layout_height="8dp"
         android:layout_marginStart="3dp"
+        android:importantForAccessibility="no"
         android:background="#2E2E2E" />
 
-    <View
+    <ImageView
         android:id="@+id/matrix_d2"
         android:layout_width="8dp"
         android:layout_height="8dp"
         android:layout_marginStart="3dp"
+        android:importantForAccessibility="no"
         android:background="#2E2E2E" />
 
-    <View
+    <ImageView
         android:id="@+id/matrix_d3"
         android:layout_width="8dp"
         android:layout_height="8dp"
         android:layout_marginStart="3dp"
+        android:importantForAccessibility="no"
         android:background="#2E2E2E" />
 
-    <View
+    <ImageView
         android:id="@+id/matrix_d4"
         android:layout_width="8dp"
         android:layout_height="8dp"
         android:layout_marginStart="3dp"
+        android:importantForAccessibility="no"
         android:background="#2E2E2E" />
 
-    <View
+    <ImageView
         android:id="@+id/matrix_d5"
         android:layout_width="8dp"
         android:layout_height="8dp"
         android:layout_marginStart="3dp"
+        android:importantForAccessibility="no"
         android:background="#2E2E2E" />
 
     <!-- Today. The cell is the tap target, the dot inside it is the state. -->
@@ -82,11 +94,12 @@
         android:layout_height="20dp"
         android:layout_marginStart="3dp">
 
-        <View
+        <ImageView
             android:id="@+id/matrix_today"
             android:layout_width="12dp"
             android:layout_height="12dp"
             android:layout_gravity="center"
+            android:importantForAccessibility="no"
             android:background="#D71921" />
     </FrameLayout>
 

@@ -1,8 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Rise: Focus Timer.
+
+  Sized for the dial: the setup face needs room for HH:MM between two steppers and a
+  START button under them, which does not fit a two-cell square. minHeight stays at
+  110dp so an existing placement is still legal, while targetCell* asks Android 12+ for
+  a sensible three-by-two default.
+
+  previewLayout renders the real layout in the picker on Android 12+, which is worth
+  having here because the two faces look nothing alike and the icon told nobody
+  anything. previewImage stays for older launchers.
+-->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:initialLayout="@layout/task_timer_widget"
-    android:minWidth="110dp"
+    android:previewLayout="@layout/task_timer_widget"
+    android:minWidth="180dp"
     android:minHeight="110dp"
+    android:targetCellWidth="3"
+    android:targetCellHeight="2"
     android:updatePeriodMillis="86400000"
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen"

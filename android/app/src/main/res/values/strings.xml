@@ -9,7 +9,7 @@
     <string name="widget_habits_desc">Every habit by day. Tap today to tick one off.</string>
 
     <string name="widget_timer_label">Rise: Focus Timer</string>
-    <string name="widget_timer_desc">Quick task focus timer with pause, resume, and switch controls.</string>
+    <string name="widget_timer_desc">Set hours and minutes, then focus. Pause, resume and reset on the home screen.</string>
 
     <string name="widget_step_label">Rise: Step Legend</string>
     <string name="widget_step_desc">Daily step tracking with real-time progress bar.</string>
@@ -33,4 +33,18 @@
     <!-- Sensor tracking foreground service -->
     <string name="sensor_service_channel_name">Habit tracking</string>
     <string name="sensor_service_channel_desc">Keeps step, distance, silence and screen-time habits counting while Rise is closed.</string>
+
+    <!-- Focus timer -->
+    <string name="focus_channel_name">Focus timer</string>
+    <string name="focus_channel_desc">Shows the countdown while a focus session is running.</string>
+    <string name="focus_done_channel_name">Focus finished</string>
+    <string name="focus_done_channel_desc">Alerts you the moment a focus session ends.</string>
+    <string name="focus_notif_running">Focus in progress</string>
+    <string name="focus_notif_paused">Focus paused</string>
+    <string name="focus_notif_of">%1$s session</string>
+    <string name="focus_action_pause">PAUSE</string>
+    <string name="focus_action_resume">RESUME</string>
+    <string name="focus_action_reset">RESET</string>
+    <string name="focus_done_title">Focus complete</string>
+    <string name="focus_done_text">%1$s of focus. Logged to your history.</string>
 </resources>

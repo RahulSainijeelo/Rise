@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, FlatList, TouchableOpacity, Modal, ScrollView } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { View, FlatList, TouchableOpacity, Modal, ScrollView, Platform } from 'react-native';
 import { useRoute } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../theme';
@@ -17,7 +17,10 @@ import { COMMON_HABITS_TEMPLATES, HabitTemplate } from '../utils/HabitTemplates'
 export const HabitsScreen = () => {
     const route = useRoute<any>();
     const navigation = useNavigation<any>();
-    const { habits, addHabit, toggleHabit, updateNumericProgress } = useAppStore();
+    const habits = useAppStore(s => s.habits);
+    const addHabit = useAppStore(s => s.addHabit);
+    const toggleHabit = useAppStore(s => s.toggleHabit);
+    const updateNumericProgress = useAppStore(s => s.updateNumericProgress);
     const { theme } = useTheme();
     const [activeTab, setActiveTab] = useState<'my' | 'explore'>('my');
     const [isAddModalVisible, setIsAddModalVisible] = useState(false);
@@ -103,7 +106,7 @@ export const HabitsScreen = () => {
 
     const todayStr = dayjs().format('YYYY-MM-DD');
 
-    const renderHabit = ({ item }: { item: Habit }) => (
+    const renderHabit = useCallback(({ item }: { item: Habit }) => (
         <TouchableOpacity
             activeOpacity={0.7}
             onPress={() => navigation.navigate('HabitDetail', { habitId: item.id })}
@@ -166,7 +169,7 @@ export const HabitsScreen = () => {
                 </View>
             </NothingCard>
         </TouchableOpacity>
-    );
+    ), [navigation, theme, todayStr, toggleHabit, updateNumericProgress]);
 
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
@@ -197,6 +200,10 @@ export const HabitsScreen = () => {
 
             <FlatList
                 showsVerticalScrollIndicator={false}
+                initialNumToRender={8}
+                maxToRenderPerBatch={8}
+                windowSize={5}
+                removeClippedSubviews={Platform.OS === 'android'}
                 data={activeTab === 'my' ? habits : [
                     { id: 'header_sensor', isHeader: true, title: 'PREMIUM SENSORS' },
                     ...COMMON_HABITS_TEMPLATES.filter(t => t.isSensorBased),

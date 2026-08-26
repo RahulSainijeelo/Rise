@@ -1,7 +1,7 @@
-import { useState, useRef } from 'react';
-import { PanResponder, Platform } from 'react-native';
+import { useState, useRef, useMemo, useCallback } from 'react';
+import { PanResponder } from 'react-native';
 import dayjs from 'dayjs';
-import { useAppStore } from '../store/useAppStore';
+import { useAppStore, Task } from '../store/useAppStore';
 import { useTheme } from '../theme';
 
 export type SubTab = 'today' | 'upcoming' | 'browse';
@@ -9,7 +9,19 @@ export type SubTab = 'today' | 'upcoming' | 'browse';
 export const useTasksScreen = () => {
     const [activeTab, setActiveTab] = useState<SubTab>('today');
     const [isAddModalVisible, setIsAddModalVisible] = useState(false);
-    const { tasks, toggleTask, labels, addTask, addLabel, deleteTask, deleteLabel } = useAppStore();
+    const {
+        tasksById,
+        taskIds,
+        tasksByCategory,
+        tasksByDate,
+        tasksByStatus,
+        toggleTask,
+        labels,
+        addTask,
+        addLabel,
+        deleteTask,
+        deleteLabel
+    } = useAppStore();
     const { theme } = useTheme();
 
     // New task state
@@ -20,8 +32,21 @@ export const useTasksScreen = () => {
     const [newLabel, setNewLabel] = useState('Inbox');
     const [customLabel, setCustomLabel] = useState('');
 
-    // Browse State
+    // Browse State & Search Debouncing
     const [searchQuery, setSearchQuery] = useState('');
+    const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+    const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    const handleSearchQueryChange = useCallback((query: string) => {
+        setSearchQuery(query);
+        if (searchDebounceRef.current) {
+            clearTimeout(searchDebounceRef.current);
+        }
+        searchDebounceRef.current = setTimeout(() => {
+            setDebouncedSearchQuery(query);
+        }, 150);
+    }, []);
+
     const [selectedLabelFilter, setSelectedLabelFilter] = useState<string | null>(null);
 
     // Picker State
@@ -41,6 +66,7 @@ export const useTasksScreen = () => {
     // Advanced Date Modal State
     const [currentMonth, setCurrentMonth] = useState(dayjs());
     const [isRepeatEnabled, setIsRepeatEnabled] = useState(false);
+    const [repeatType, setRepeatType] = useState<'daily' | 'weekly' | 'monthly'>('daily');
     const [timeMode, setTimeMode] = useState<'hour' | 'minute'>('hour');
 
     const timeModeRef = useRef(timeMode);
@@ -110,31 +136,83 @@ export const useTasksScreen = () => {
         })
     ).current;
 
-    const allFilteredTasks = tasks.filter(t => {
+    const allFilteredTasks = useMemo(() => {
+        const todayStr = dayjs().format('YYYY-MM-DD');
+
         if (activeTab === 'today') {
-            const isToday = t.dueDate === dayjs().format('YYYY-MM-DD') || !t.dueDate;
-            return isToday && !t.completed;
+            const activeIds = tasksByStatus?.active || [];
+            const result: Task[] = [];
+            for (let i = 0; i < activeIds.length; i++) {
+                const task = tasksById[activeIds[i]];
+                if (task && (task.dueDate === todayStr || !task.dueDate)) {
+                    result.push(task);
+                }
+            }
+            return result;
         }
+
         if (activeTab === 'upcoming') {
-            const isUpcoming = t.dueDate && dayjs(t.dueDate).isAfter(dayjs(), 'day');
-            return isUpcoming && !t.completed;
+            const activeIds = tasksByStatus?.active || [];
+            const result: Task[] = [];
+            for (let i = 0; i < activeIds.length; i++) {
+                const task = tasksById[activeIds[i]];
+                if (task && task.dueDate && task.dueDate > todayStr) {
+                    result.push(task);
+                }
+            }
+            return result;
         }
+
         if (activeTab === 'browse') {
-            const matchesSearch = t.title.toLowerCase().includes(searchQuery.toLowerCase());
+            const query = debouncedSearchQuery.trim().toLowerCase();
+            let targetIds: string[];
 
             if (selectedLabelFilter === 'Done') {
-                return matchesSearch && t.completed;
+                targetIds = tasksByStatus?.completed || [];
+            } else if (selectedLabelFilter) {
+                const categoryIds = tasksByCategory?.[selectedLabelFilter] || [];
+                targetIds = [];
+                for (let i = 0; i < categoryIds.length; i++) {
+                    const task = tasksById[categoryIds[i]];
+                    if (task && !task.completed) {
+                        targetIds.push(task.id);
+                    }
+                }
+            } else {
+                targetIds = tasksByStatus?.active || [];
             }
 
-            const matchesLabel = selectedLabelFilter ? t.category === selectedLabelFilter : true;
-            return matchesSearch && matchesLabel && !t.completed;
+            if (!query) {
+                const result: Task[] = [];
+                for (let i = 0; i < targetIds.length; i++) {
+                    const task = tasksById[targetIds[i]];
+                    if (task) result.push(task);
+                }
+                return result;
+            }
+
+            const result: Task[] = [];
+            for (let i = 0; i < targetIds.length; i++) {
+                const task = tasksById[targetIds[i]];
+                if (task && task.title.toLowerCase().includes(query)) {
+                    result.push(task);
+                }
+            }
+            return result;
         }
-        return true;
-    });
 
-    const activeTask = tasks.find(t => t.id === selectedTaskForView);
+        const allIds = taskIds || [];
+        const result: Task[] = [];
+        for (let i = 0; i < allIds.length; i++) {
+            const task = tasksById[allIds[i]];
+            if (task) result.push(task);
+        }
+        return result;
+    }, [activeTab, debouncedSearchQuery, selectedLabelFilter, tasksById, tasksByStatus, tasksByCategory, taskIds]);
 
-    const handleAddTask = () => {
+    const activeTask = selectedTaskForView ? tasksById[selectedTaskForView] : undefined;
+
+    const handleAddTask = useCallback(() => {
         if (newTitle.trim()) {
             addTask({
                 title: newTitle,
@@ -144,17 +222,20 @@ export const useTasksScreen = () => {
                 category: newLabel,
                 reminders: selectedReminders,
                 duration: duration || undefined,
+                repeat: isRepeatEnabled ? repeatType : 'none',
                 subtasks: []
             });
             setNewTitle('');
             setNewTime(undefined);
             setDuration(null);
             setSelectedReminders([]);
+            setIsRepeatEnabled(false);
+            setRepeatType('daily');
             setIsAddModalVisible(false);
         }
-    };
+    }, [newTitle, newDate, newTime, newPriority, newLabel, selectedReminders, duration, isRepeatEnabled, repeatType, addTask]);
 
-    const handleOpenAddModal = () => {
+    const handleOpenAddModal = useCallback(() => {
         setNewTitle('');
         setNewDate(dayjs().format('YYYY-MM-DD'));
         setNewTime(undefined);
@@ -162,30 +243,32 @@ export const useTasksScreen = () => {
         setNewLabel('Inbox');
         setDuration(null);
         setSelectedReminders([]);
+        setIsRepeatEnabled(false);
+        setRepeatType('daily');
         setIsAddModalVisible(true);
-    };
+    }, []);
 
-    const onDateChange = (event: any, selectedDate?: Date) => {
+    const onDateChange = useCallback((event: any, selectedDate?: Date) => {
         setShowDatePicker(false);
         if (selectedDate) {
             setNewDate(dayjs(selectedDate).format('YYYY-MM-DD'));
         }
-    };
+    }, []);
 
-    const onTimeChange = (event: any, selectedDate?: Date) => {
+    const onTimeChange = useCallback((event: any, selectedDate?: Date) => {
         setShowTimePicker(false);
         if (selectedDate) {
             setNewTime(dayjs(selectedDate).format('HH:mm'));
         }
-    };
+    }, []);
 
-    const handleTaskPress = (taskId: string) => {
+    const handleTaskPress = useCallback((taskId: string) => {
         setSelectedTaskForView(taskId);
         setIsDetailModalVisible(true);
-    };
+    }, []);
 
-    const handleAddSubtask = (taskId: string, title: string) => {
-        const task = tasks.find(t => t.id === taskId);
+    const handleAddSubtask = useCallback((taskId: string, title: string) => {
+        const task = useAppStore.getState().tasksById[taskId];
         if (task) {
             const newSubtask = {
                 id: Math.random().toString(36).substr(2, 9),
@@ -195,54 +278,54 @@ export const useTasksScreen = () => {
             const updatedSubtasks = [...(task.subtasks || []), newSubtask];
             useAppStore.getState().updateTask(taskId, { subtasks: updatedSubtasks });
         }
-    };
+    }, []);
 
-    const handleToggleSubtask = (taskId: string, subtaskId: string) => {
-        const task = tasks.find(t => t.id === taskId);
+    const handleToggleSubtask = useCallback((taskId: string, subtaskId: string) => {
+        const task = useAppStore.getState().tasksById[taskId];
         if (task) {
             const updatedSubtasks = task.subtasks.map(st =>
                 st.id === subtaskId ? { ...st, completed: !st.completed } : st
             );
             useAppStore.getState().updateTask(taskId, { subtasks: updatedSubtasks });
         }
-    };
+    }, []);
 
-    const handleDeleteSubtask = (taskId: string, subtaskId: string) => {
-        const task = tasks.find(t => t.id === taskId);
+    const handleDeleteSubtask = useCallback((taskId: string, subtaskId: string) => {
+        const task = useAppStore.getState().tasksById[taskId];
         if (task) {
             const updatedSubtasks = task.subtasks.filter(st => st.id !== subtaskId);
             useAppStore.getState().updateTask(taskId, { subtasks: updatedSubtasks });
         }
-    };
+    }, []);
 
-    const handleUpdateTaskPriority = (taskId: string, priority: 1 | 2 | 3 | 4) => {
+    const handleUpdateTaskPriority = useCallback((taskId: string, priority: 1 | 2 | 3 | 4) => {
         useAppStore.getState().updateTask(taskId, { priority });
-    };
+    }, []);
 
-    const handleUpdateTaskLabel = (taskId: string, label: string) => {
+    const handleUpdateTaskLabel = useCallback((taskId: string, label: string) => {
         useAppStore.getState().updateTask(taskId, { category: label });
-    };
+    }, []);
 
-    const handleUpdateTaskDate = (taskId: string, date: string) => {
+    const handleUpdateTaskDate = useCallback((taskId: string, date: string) => {
         useAppStore.getState().updateTask(taskId, { dueDate: date });
-    };
+    }, []);
 
-    const handleUpdateTaskTime = (taskId: string, time: string | undefined) => {
+    const handleUpdateTaskTime = useCallback((taskId: string, time: string | undefined) => {
         useAppStore.getState().updateTask(taskId, { dueTime: time });
-    };
+    }, []);
 
-    const handleUpdateTaskDuration = (taskId: string, duration: number | null) => {
-        useAppStore.getState().updateTask(taskId, { duration: duration || undefined });
-    };
+    const handleUpdateTaskDuration = useCallback((taskId: string, durationVal: number | null) => {
+        useAppStore.getState().updateTask(taskId, { duration: durationVal || undefined });
+    }, []);
 
-    const handleUpdateTaskReminders = (taskId: string, reminders: string[]) => {
+    const handleUpdateTaskReminders = useCallback((taskId: string, reminders: string[]) => {
         useAppStore.getState().updateTask(taskId, { reminders });
-    };
+    }, []);
 
     return {
         activeTab, setActiveTab,
         isAddModalVisible, setIsAddModalVisible,
-        tasks, toggleTask, labels, addTask, addLabel, deleteTask, deleteLabel,
+        toggleTask, labels, addTask, addLabel, deleteTask, deleteLabel,
         theme,
         newTitle, setNewTitle,
         newDate, setNewDate,
@@ -250,7 +333,7 @@ export const useTasksScreen = () => {
         newPriority, setNewPriority,
         newLabel, setNewLabel: setNewLabel,
         customLabel, setCustomLabel,
-        searchQuery, setSearchQuery,
+        searchQuery, setSearchQuery: handleSearchQueryChange,
         selectedLabelFilter, setSelectedLabelFilter,
         showDatePicker, setShowDatePicker,
         showAdvDateModal, setShowAdvDateModal,
@@ -264,6 +347,7 @@ export const useTasksScreen = () => {
         showManageLabelsModal, setShowManageLabelsModal,
         currentMonth, setCurrentMonth,
         isRepeatEnabled, setIsRepeatEnabled,
+        repeatType, setRepeatType,
         timeMode, setTimeMode,
         handleTimeDrag,
         panResponder,

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { View, Modal, ScrollView, TouchableOpacity, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../theme';
@@ -10,12 +10,8 @@ import { X, CheckCircle2, Circle, Flame } from 'lucide-react-native';
 import dayjs from 'dayjs';
 import { styles } from '../styles/HomeScreen.styles';
 
-export const HomeScreen = () => {
-    const [selectedDate, setSelectedDate] = useState(dayjs().format('YYYY-MM-DD'));
-    const [modalVisible, setModalVisible] = useState(false);
+const HomeScreenClock: React.FC<{ theme: any }> = React.memo(({ theme }) => {
     const [currentTime, setCurrentTime] = useState(dayjs());
-    const { tasks, habits } = useAppStore();
-    const { theme } = useTheme();
 
     React.useEffect(() => {
         const timer = setInterval(() => {
@@ -24,67 +20,91 @@ export const HomeScreen = () => {
         return () => clearInterval(timer);
     }, []);
 
-    const dayTasks = tasks.filter(t => t.dueDate === selectedDate);
-    const dayHabits = habits.filter(h => h.completedDates.includes(selectedDate));
+    return (
+        <View style={{ marginBottom: 16 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                <NothingText variant="dot" size={64} color={theme.colors.text}>
+                    {currentTime.format('HH:mm')}
+                </NothingText>
+                <NothingText variant="dot" size={24} color="#FF3B30" style={{ marginLeft: 4 }}>
+                    {currentTime.format('ss')}
+                </NothingText>
+            </View>
+            <NothingText variant="medium" color={theme.colors.textSecondary} size={14} style={{ letterSpacing: 4, marginTop: -8 }}>
+                {currentTime.format('dddd, MMMM D').toUpperCase()}
+            </NothingText>
+        </View>
+    );
+});
 
-    const onDayPress = (day: any) => {
+export const HomeScreen = () => {
+    const [selectedDate, setSelectedDate] = useState(dayjs().format('YYYY-MM-DD'));
+    const [modalVisible, setModalVisible] = useState(false);
+    const tasks = useAppStore(s => s.tasks);
+    const habits = useAppStore(s => s.habits);
+    const { theme } = useTheme();
+
+    const dayTasks = useMemo(() => {
+        return tasks.filter(t => t.dueDate === selectedDate);
+    }, [tasks, selectedDate]);
+
+    const dayHabits = useMemo(() => {
+        return habits.filter(h => h.completedDates.includes(selectedDate));
+    }, [habits, selectedDate]);
+
+    const onDayPress = useCallback((day: any) => {
         setSelectedDate(day.dateString);
         setModalVisible(true);
-    };
+    }, []);
 
-    // Mark dates with tasks/habits
-    const markedDates: any = {};
+    // Mark dates with tasks/habits (memoized)
+    const markedDates = useMemo(() => {
+        const result: any = {};
 
-    // Process tasks
-    tasks.forEach(t => {
-        if (t.dueDate) {
-            const dots = markedDates[t.dueDate]?.dots || [];
-            if (t.completed) {
-                dots.push({ key: `task-${t.id}`, color: '#007AFF', selectedDotColor: theme.colors.background });
-            } else {
-                dots.push({ key: `task-${t.id}`, color: theme.colors.textSecondary, selectedDotColor: theme.colors.background });
+        // Process tasks
+        for (let i = 0; i < tasks.length; i++) {
+            const t = tasks[i];
+            if (t.dueDate) {
+                const dots = result[t.dueDate]?.dots || [];
+                if (t.completed) {
+                    dots.push({ key: `task-${t.id}`, color: '#007AFF', selectedDotColor: theme.colors.background });
+                } else {
+                    dots.push({ key: `task-${t.id}`, color: theme.colors.textSecondary, selectedDotColor: theme.colors.background });
+                }
+                result[t.dueDate] = {
+                    ...result[t.dueDate],
+                    dots
+                };
             }
-            markedDates[t.dueDate] = {
-                ...markedDates[t.dueDate],
-                dots
-            };
         }
-    });
 
-    // Process habits
-    habits.forEach(h => {
-        h.completedDates.forEach(date => {
-            const dots = markedDates[date]?.dots || [];
-            dots.push({ key: `habit-${h.id}`, color: theme.colors.success, selectedDotColor: theme.colors.background });
-            markedDates[date] = {
-                ...markedDates[date],
-                dots
-            };
-        });
-    });
+        // Process habits
+        for (let i = 0; i < habits.length; i++) {
+            const h = habits[i];
+            for (let j = 0; j < h.completedDates.length; j++) {
+                const date = h.completedDates[j];
+                const dots = result[date]?.dots || [];
+                dots.push({ key: `habit-${h.id}`, color: theme.colors.success, selectedDotColor: theme.colors.background });
+                result[date] = {
+                    ...result[date],
+                    dots
+                };
+            }
+        }
 
-    markedDates[selectedDate] = {
-        ...markedDates[selectedDate],
-        selected: true,
-        selectedColor: theme.colors.primary,
-    };
+        result[selectedDate] = {
+            ...result[selectedDate],
+            selected: true,
+            selectedColor: theme.colors.primary,
+        };
+
+        return result;
+    }, [tasks, habits, selectedDate, theme]);
 
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
             <View style={styles.header}>
-                <View style={{ marginBottom: 16, }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-                        <NothingText variant="dot" size={64} color={theme.colors.text}>
-                            {currentTime.format('HH:mm')}
-                        </NothingText>
-                        <NothingText variant="dot" size={24} color="#FF3B30" style={{ marginLeft: 4 }}>
-                            {currentTime.format('ss')}
-                        </NothingText>
-                    </View>
-                    <NothingText variant="medium" color={theme.colors.textSecondary} size={14} style={{ letterSpacing: 4, marginTop: -8 }}>
-                        {currentTime.format('dddd, MMMM D').toUpperCase()}
-                    </NothingText>
-                </View>
+                <HomeScreenClock theme={theme} />
 
                 <View style={{ height: 1, backgroundColor: theme.colors.border, marginBottom: 24, opacity: 0.5 }} />
 

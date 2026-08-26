@@ -10,7 +10,8 @@ import { ModalHandle } from './ModalHandle';
 
 export const DueDateModal: React.FC<DueDateModalProps> = ({
     visible, onClose, theme, insets, newDate, setNewDate, newTime, setNewTime,
-    currentMonth, setCurrentMonth, isRepeatEnabled, setIsRepeatEnabled, onAddTime
+    currentMonth, setCurrentMonth, isRepeatEnabled, setIsRepeatEnabled,
+    repeatType = 'daily', setRepeatType, onAddTime
 }) => (
     <Modal
         transparent={true}
@@ -141,7 +142,7 @@ export const DueDateModal: React.FC<DueDateModalProps> = ({
                     <View style={{ height: 1, backgroundColor: theme.colors.border, marginVertical: 8 }} />
 
                     <View style={styles.dateOption}>
-                        <Repeat size={20} color={theme.colors.text} />
+                        <Repeat size={20} color={isRepeatEnabled ? theme.colors.primary : theme.colors.text} />
                         <NothingText style={styles.dateOptionText}>Repeat</NothingText>
                         <Switch
                             trackColor={{ false: theme.colors.surface2, true: theme.colors.primary }}
@@ -150,6 +151,28 @@ export const DueDateModal: React.FC<DueDateModalProps> = ({
                             onValueChange={setIsRepeatEnabled}
                         />
                     </View>
+
+                    {isRepeatEnabled && (
+                        <View style={{ flexDirection: 'row', gap: 8, marginTop: 8, paddingLeft: 32 }}>
+                            {(['daily', 'weekly', 'monthly'] as const).map(freq => (
+                                <TouchableOpacity
+                                    key={freq}
+                                    style={[
+                                        styles.dateChip,
+                                        repeatType === freq && { backgroundColor: theme.colors.primary }
+                                    ]}
+                                    onPress={() => setRepeatType?.(freq)}
+                                >
+                                    <NothingText
+                                        size={12}
+                                        color={repeatType === freq ? theme.colors.background : theme.colors.text}
+                                    >
+                                        {freq.charAt(0).toUpperCase() + freq.slice(1)}
+                                    </NothingText>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                    )}
                 </View>
             </GestureHandlerRootView>
         </TouchableOpacity>

@@ -9,7 +9,7 @@ import {
     KeyboardAvoidingView,
     Platform,
 } from 'react-native';
-import { X, Plus, Trash2, Calendar, Tag, AlertCircle, CheckCircle2, Circle, Flag } from 'lucide-react-native';
+import { X, Plus, Trash2, Calendar, Tag, AlertCircle, CheckCircle2, Circle, Flag, Bell, Repeat } from 'lucide-react-native';
 import dayjs from 'dayjs';
 import { NothingText } from '../NothingText';
 import { ModalHandle } from './ModalHandle';
@@ -28,6 +28,7 @@ interface TaskDetailModalProps {
     onUpdatePriority: (taskId: string, priority: 1 | 2 | 3 | 4) => void;
     onUpdateLabel: (taskId: string) => void;
     onUpdateDate: (taskId: string, type?: 'date' | 'duration') => void;
+    onUpdateReminders?: (taskId: string) => void;
     getPriorityColor: (priority: number) => string;
 }
 
@@ -43,6 +44,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
     onUpdatePriority,
     onUpdateLabel,
     onUpdateDate,
+    onUpdateReminders,
     getPriorityColor,
 }) => {
     const [newStep, setNewStep] = useState('');
@@ -147,15 +149,19 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                                     </View>
                                 </TouchableOpacity>
 
-                                <View style={[styles.metaItem, { flex: 2, backgroundColor: theme.colors.surface, borderColor: theme.colors.border, borderWidth: 1 }]}>
+                                <TouchableOpacity
+                                    style={[styles.metaItem, { flex: 2, backgroundColor: theme.colors.surface, borderColor: theme.colors.border, borderWidth: 1 }]}
+                                    onPress={() => onUpdateReminders?.(task.id)}
+                                >
+                                    <Bell size={16} color={task.reminders && task.reminders.length > 0 ? theme.colors.primary : theme.colors.textSecondary} />
                                     <View style={styles.metaTextContainer}>
-                                        <NothingText size={14} color={theme.colors.primary}>
-                                            {task.dueDate && task.reminders?.length > 0
-                                                ? dayjs(`${task.dueDate} ${task.dueTime || '09:00'}`).format('DD MMM, HH:mm')
-                                                : 'NO ALERTS SET'}
+                                        <NothingText size={14} color={task.reminders && task.reminders.length > 0 ? theme.colors.primary : theme.colors.text}>
+                                            {task.reminders && task.reminders.length > 0
+                                                ? `${task.reminders.length} ALERT${task.reminders.length > 1 ? 'S' : ''}`
+                                                : 'ADD ALERT'}
                                         </NothingText>
                                     </View>
-                                </View>
+                                </TouchableOpacity>
                             </View>
 
                             <NothingText variant="bold" size={16} style={styles.sectionTitle}>

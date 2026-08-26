@@ -8,14 +8,14 @@ import { NothingButton } from '../components/NothingButton';
 import { useAppStore } from '../store/useAppStore';
 import { StorageService, UserProfile } from '../services/StorageService';
 import { SettingsService } from '../services/SettingsService';
-import { Download, LogOut, User, ShieldCheck, Check, Users, Github, Coffee, Heart } from 'lucide-react-native';
+import { Download, LogOut, User, ShieldCheck, Check, Users, Github, Coffee, Heart, Sparkles } from 'lucide-react-native';
 import { ProfileScreenStyle as styles } from '../styles/ProfileScreen.style';
 import { requestStoragePermission } from '../utils/permissions';
 import { ConfirmationModal } from '../components/ConfirmationModal';
 import { Linking, Platform } from 'react-native';
 
 export const ProfileScreen = ({ navigation }: any) => {
-    const { activeProfile, currentUser, logout, tasks, habits, login } = useAppStore();
+    const { activeProfile, currentUser, logout, tasks, habits, login, loadData } = useAppStore();
     const { theme } = useTheme();
     const [isDefault, setIsDefault] = useState(false);
     const [allProfiles, setAllProfiles] = useState<UserProfile[]>([]);
@@ -110,6 +110,31 @@ export const ProfileScreen = ({ navigation }: any) => {
         }
     };
 
+    const handleSeedData = async () => {
+        if (!activeProfile) return;
+        setConfirmData({
+            title: 'SEED TEST DATA',
+            message: 'This will populate your profile with 200 tasks, 5 rich habits, and categories for performance testing. Continue?',
+            type: 'info',
+            onConfirm: async () => {
+                setConfirmVisible(false);
+                const { generateSeedData } = await import('../utils/SeedData');
+                const seed = generateSeedData();
+                const dataToSave = {
+                    id: activeProfile.id,
+                    name: activeProfile.name,
+                    tasks: seed.tasks,
+                    habits: seed.habits,
+                    labels: seed.labels
+                };
+                await StorageService.saveUserData(activeProfile.id, dataToSave);
+                await loadData(activeProfile.id);
+                Alert.alert('Success', 'Profile loaded with 200 tasks and 5 habits!');
+            }
+        });
+        setConfirmVisible(true);
+    };
+
     const handleLogout = () => {
         setConfirmData({
             title: 'Logout',
@@ -193,6 +218,17 @@ export const ProfileScreen = ({ navigation }: any) => {
                             />
                         </View>
                     </NothingCard>
+
+                    <TouchableOpacity onPress={handleSeedData}>
+                        <NothingCard margin="xs" style={styles.actionItem}>
+                            <View style={styles.row}>
+                                <View style={styles.rowLeft}>
+                                    <Sparkles size={20} color={theme.colors.primary} />
+                                    <NothingText style={[styles.actionText, { color: theme.colors.primary }]}>Seed 200 Tasks (Perf Test)</NothingText>
+                                </View>
+                            </View>
+                        </NothingCard>
+                    </TouchableOpacity>
 
                     <TouchableOpacity onPress={handleDownload}>
                         <NothingCard margin="xs" style={styles.actionItem}>

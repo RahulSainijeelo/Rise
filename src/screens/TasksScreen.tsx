@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, FlatList, TouchableOpacity, ScrollView, Platform } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { View, FlatList, TouchableOpacity, ScrollView, Platform, ActivityIndicator, InteractionManager } from 'react-native';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Plus, ChevronDown, ChevronUp, Search, SlidersHorizontal } from 'lucide-react-native';
@@ -20,6 +20,7 @@ import { ManageLabelsModal } from '../components/tasks/ManageLabelsModal';
 import { styles } from '../styles/TaskScreen.style';
 import { getPriorityColor } from '../utils/TaskScreen.utils';
 import { useAppStore } from '../store/useAppStore';
+
 export const TasksScreen = () => {
     const route = useRoute<any>();
     const navigation = useNavigation<any>();
@@ -46,6 +47,7 @@ export const TasksScreen = () => {
         showLabelPicker, setShowLabelPicker,
         currentMonth, setCurrentMonth,
         isRepeatEnabled, setIsRepeatEnabled,
+        repeatType, setRepeatType,
         timeMode, setTimeMode,
         panResponder,
         allFilteredTasks,
@@ -73,6 +75,7 @@ export const TasksScreen = () => {
         showManageLabelsModal, setShowManageLabelsModal,
     } = useTasksScreen();
     const insets = useSafeAreaInsets();
+    const [isTabLoading, setIsTabLoading] = useState(false);
 
     React.useEffect(() => {
         if (route.params?.openAdd) {
@@ -80,6 +83,37 @@ export const TasksScreen = () => {
             navigation.setParams({ openAdd: undefined });
         }
     }, [route.params?.openAdd]);
+
+    const handleTabChange = useCallback((tab: SubTab) => {
+        if (tab === activeTab) return;
+        setIsTabLoading(true);
+        setActiveTab(tab);
+        InteractionManager.runAfterInteractions(() => {
+            setIsTabLoading(false);
+        });
+    }, [activeTab, setActiveTab]);
+
+    const handleLabelFilterChange = useCallback((filter: string | null) => {
+        if (filter === selectedLabelFilter) return;
+        setIsTabLoading(true);
+        setSelectedLabelFilter(filter);
+        InteractionManager.runAfterInteractions(() => {
+            setIsTabLoading(false);
+        });
+    }, [selectedLabelFilter, setSelectedLabelFilter]);
+
+    const renderTaskItem = useCallback(({ item }: { item: any }) => (
+        <TaskItem
+            item={item}
+            theme={theme}
+            toggleTask={toggleTask}
+            deleteTask={deleteTask}
+            getPriorityColor={getPriorityColor}
+            onPress={handleTaskPress}
+        />
+    ), [theme, toggleTask, deleteTask, handleTaskPress]);
+
+    const keyExtractor = useCallback((item: any) => item.id, []);
 
     return (
         <>
@@ -89,7 +123,7 @@ export const TasksScreen = () => {
                 </View>
                 <View style={[styles.subTabs, { borderBottomColor: theme.colors.border }]}>
                     {(['today', 'upcoming', 'browse'] as SubTab[]).map(tab => (
-                        <TouchableOpacity key={tab} onPress={() => setActiveTab(tab)} style={styles.tabItem}>
+                        <TouchableOpacity key={tab} onPress={() => handleTabChange(tab)} style={styles.tabItem}>
                             <NothingText
                                 variant={activeTab === tab ? 'bold' : 'regular'}
                                 color={activeTab === tab ? theme.colors.text : theme.colors.textSecondary}
@@ -141,7 +175,7 @@ export const TasksScreen = () => {
                         </View>
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.labelList}>
                             <TouchableOpacity
-                                onPress={() => setSelectedLabelFilter(null)}
+                                onPress={() => handleLabelFilterChange(null)}
                                 style={[
                                     styles.labelChip,
                                     { backgroundColor: selectedLabelFilter === null ? theme.colors.primary : "transparent" }
@@ -150,7 +184,7 @@ export const TasksScreen = () => {
                                 <NothingText color={selectedLabelFilter === null ? theme.colors.background : theme.colors.text} size={12}>All</NothingText>
                             </TouchableOpacity>
                             <TouchableOpacity
-                                onPress={() => setSelectedLabelFilter(selectedLabelFilter === 'Done' ? null : 'Done')}
+                                onPress={() => handleLabelFilterChange(selectedLabelFilter === 'Done' ? null : 'Done')}
                                 style={[
                                     styles.labelChip,
                                     { backgroundColor: selectedLabelFilter === 'Done' ? theme.colors.primary : "transparent" }
@@ -161,7 +195,7 @@ export const TasksScreen = () => {
                             {labels.map(label => (
                                 <TouchableOpacity
                                     key={label.id}
-                                    onPress={() => setSelectedLabelFilter(selectedLabelFilter === label.name ? null : label.name)}
+                                    onPress={() => handleLabelFilterChange(selectedLabelFilter === label.name ? null : label.name)}
                                     style={[
                                         styles.labelChip,
                                         { backgroundColor: selectedLabelFilter === label.name ? theme.colors.primary : "transparent" }
@@ -174,29 +208,31 @@ export const TasksScreen = () => {
                     </View>
                 )}
 
-                <FlatList
-                    showsVerticalScrollIndicator={false}
-                    data={allFilteredTasks}
-                    renderItem={({ item }) => (
-                        <TaskItem
-                            item={item}
-                            theme={theme}
-                            toggleTask={toggleTask}
-                            deleteTask={deleteTask}
-                            getPriorityColor={getPriorityColor}
-                            onPress={handleTaskPress}
-                        />
-                    )}
-                    keyExtractor={(item) => item.id}
-                    contentContainerStyle={styles.listContainer}
-                    ListEmptyComponent={
-                        allFilteredTasks.length === 0 ? (
-                            <View style={styles.emptyContainer}>
-                                <NothingText color={theme.colors.textSecondary}>No tasks found</NothingText>
-                            </View>
-                        ) : null
-                    }
-                />
+                {isTabLoading ? (
+                    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', minHeight: 300 }}>
+                        <ActivityIndicator size="large" color={theme.colors.primary} />
+                    </View>
+                ) : (
+                    <FlatList
+                        showsVerticalScrollIndicator={false}
+                        data={allFilteredTasks}
+                        renderItem={renderTaskItem}
+                        keyExtractor={keyExtractor}
+                        contentContainerStyle={styles.listContainer}
+                        initialNumToRender={14}
+                        maxToRenderPerBatch={10}
+                        windowSize={11}
+                        updateCellsBatchingPeriod={50}
+                        removeClippedSubviews={Platform.OS === 'android'}
+                        ListEmptyComponent={
+                            allFilteredTasks.length === 0 ? (
+                                <View style={styles.emptyContainer}>
+                                    <NothingText color={theme.colors.textSecondary}>No tasks found</NothingText>
+                                </View>
+                            ) : null
+                        }
+                    />
+                )}
 
                 <TouchableOpacity
                     style={[styles.fab, { backgroundColor: theme.colors.primary }]}
@@ -215,7 +251,7 @@ export const TasksScreen = () => {
                 setNewTitle={setNewTitle}
                 newDate={newDate}
                 newPriority={newPriority}
-                setNewPriority={setNewPriority as any}
+                setNewPriority={setNewPriority}
                 duration={duration}
                 selectedReminders={selectedReminders}
                 newLabel={newLabel}
@@ -250,8 +286,22 @@ export const TasksScreen = () => {
                 }}
                 currentMonth={currentMonth}
                 setCurrentMonth={setCurrentMonth}
-                isRepeatEnabled={isRepeatEnabled}
-                setIsRepeatEnabled={setIsRepeatEnabled}
+                isRepeatEnabled={isDetailModalVisible && activeTask ? (activeTask.repeat !== 'none' && !!activeTask.repeat) : isRepeatEnabled}
+                setIsRepeatEnabled={(enabled) => {
+                    if (isDetailModalVisible && activeTask) {
+                        useAppStore.getState().updateTask(activeTask.id, { repeat: enabled ? (activeTask.repeat && activeTask.repeat !== 'none' ? activeTask.repeat : 'daily') : 'none' });
+                    } else {
+                        setIsRepeatEnabled(enabled);
+                    }
+                }}
+                repeatType={isDetailModalVisible && activeTask ? ((activeTask.repeat && activeTask.repeat !== 'none') ? activeTask.repeat : 'daily') : repeatType}
+                setRepeatType={(freq) => {
+                    if (isDetailModalVisible && activeTask) {
+                        useAppStore.getState().updateTask(activeTask.id, { repeat: freq });
+                    } else {
+                        setRepeatType(freq);
+                    }
+                }}
                 onAddTime={() => {
                     if (isDetailModalVisible && activeTask) {
                         setNewTime(activeTask.dueTime || dayjs().format('HH:mm'));
@@ -301,7 +351,7 @@ export const TasksScreen = () => {
                 onClose={() => setShowRemindersModal(false)}
                 theme={theme}
                 insets={insets}
-                selectedReminders={isDetailModalVisible && activeTask ? activeTask.reminders : selectedReminders}
+                selectedReminders={isDetailModalVisible && activeTask ? activeTask.reminders || [] : selectedReminders}
                 setSelectedReminders={(r) => {
                     if (isDetailModalVisible && activeTask) {
                         handleUpdateTaskReminders(activeTask.id, r);
@@ -367,6 +417,11 @@ export const TasksScreen = () => {
                         setShowDurationModal(true);
                     } else {
                         setShowAdvDateModal(true);
+                    }
+                }}
+                onUpdateReminders={(taskId) => {
+                    if (activeTask && activeTask.id === taskId) {
+                        setShowRemindersModal(true);
                     }
                 }}
                 getPriorityColor={getPriorityColor}

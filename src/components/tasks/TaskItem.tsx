@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, StyleSheet, TouchableOpacity, Animated } from 'react-native';
+import React, { useCallback } from 'react';
+import { View, TouchableOpacity, Animated } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { CheckCircle2, Circle, Trash2, Check } from 'lucide-react-native';
 import dayjs from 'dayjs';
@@ -13,9 +13,9 @@ interface TaskItemProps extends BaseTaskItemProps {
     deleteTask: (taskId: string) => void;
 }
 
-export const TaskItem: React.FC<TaskItemProps> = ({ item, theme, toggleTask, deleteTask, getPriorityColor, onPress }) => {
+const TaskItemComponent: React.FC<TaskItemProps> = ({ item, theme, toggleTask, deleteTask, getPriorityColor, onPress }) => {
 
-    const renderLeftActions = (_progress: any, dragX: any) => {
+    const renderLeftActions = useCallback((_progress: any, dragX: any) => {
         const trans = dragX.interpolate({
             inputRange: [0, 50, 100, 101],
             outputRange: [-20, 0, 0, 1],
@@ -30,9 +30,9 @@ export const TaskItem: React.FC<TaskItemProps> = ({ item, theme, toggleTask, del
                 </Animated.View>
             </TouchableOpacity>
         );
-    };
+    }, [deleteTask, item.id, theme.colors.error]);
 
-    const renderRightActions = (_progress: any, dragX: any) => {
+    const renderRightActions = useCallback((_progress: any, dragX: any) => {
         const trans = dragX.interpolate({
             inputRange: [-101, -100, -50, 0],
             outputRange: [-1, 0, 0, 20],
@@ -47,7 +47,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({ item, theme, toggleTask, del
                 </Animated.View>
             </TouchableOpacity>
         );
-    };
+    }, [toggleTask, item.id, theme.colors.primary]);
 
     return (
         <Swipeable
@@ -56,13 +56,6 @@ export const TaskItem: React.FC<TaskItemProps> = ({ item, theme, toggleTask, del
             friction={2}
             leftThreshold={40}
             rightThreshold={40}
-            onSwipeableOpen={(direction) => {
-                if (direction === 'left') {
-                    // deleteTask(item.id); // Uncomment if you want auto-delete on full swipe
-                } else if (direction === 'right') {
-                    // toggleTask(item.id); // Uncomment if you want auto-toggle on full swipe
-                }
-            }}
         >
             <NothingCard margin="xs" style={styles.taskCard}>
                 <View style={styles.taskMain}>
@@ -97,3 +90,13 @@ export const TaskItem: React.FC<TaskItemProps> = ({ item, theme, toggleTask, del
         </Swipeable>
     );
 };
+
+export const TaskItem = React.memo(TaskItemComponent, (prevProps, nextProps) => {
+    return (
+        prevProps.item === nextProps.item &&
+        prevProps.theme === nextProps.theme &&
+        prevProps.toggleTask === nextProps.toggleTask &&
+        prevProps.deleteTask === nextProps.deleteTask &&
+        prevProps.onPress === nextProps.onPress
+    );
+});

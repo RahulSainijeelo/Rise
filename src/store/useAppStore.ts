@@ -5,6 +5,15 @@ import { WidgetService } from '../services/WidgetService';
 import { notificationService } from '../services/NotificationService';
 import { SoundService } from '../services/SoundService';
 import { SettingsService } from '../services/SettingsService';
+import {
+    NormalizedTaskState,
+    buildNormalizedTasks,
+    addTaskToNormalized,
+    updateTaskInNormalized,
+    toggleTaskInNormalized,
+    deleteTaskFromNormalized,
+    getTasksArray
+} from '../utils/NormalizedTaskStore';
 
 export interface Task {
     id: string;
@@ -62,6 +71,14 @@ interface AppState {
     currentUser: string | null;
 
     tasks: Task[];
+    tasksById: Record<string, Task>;
+    taskIds: string[];
+    tasksByCategory: Record<string, string[]>;
+    tasksByDate: Record<string, string[]>;
+    tasksByStatus: {
+        active: string[];
+        completed: string[];
+    };
     habits: Habit[];
     labels: Label[];
 
@@ -116,10 +133,26 @@ const DEFAULT_LABELS: Label[] = [
     { id: 'l3', name: 'Personal' }
 ];
 
+let saveDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+const scheduleSave = (get: () => AppState) => {
+    if (saveDebounceTimer) {
+        clearTimeout(saveDebounceTimer);
+    }
+    saveDebounceTimer = setTimeout(() => {
+        get().saveData();
+    }, 400);
+};
+
 export const useAppStore = create<AppState>((set, get) => ({
     activeProfile: null,
     currentUser: null,
     tasks: [],
+    tasksById: {},
+    taskIds: [],
+    tasksByCategory: {},
+    tasksByDate: {},
+    tasksByStatus: { active: [], completed: [] },
     habits: [],
     labels: DEFAULT_LABELS,
     activeTimer: null,
@@ -140,74 +173,136 @@ export const useAppStore = create<AppState>((set, get) => ({
     createProfile: async (name) => {
         const id = Math.random().toString(36).substr(2, 9);
         const newProfile = { id, name };
-        set({ activeProfile: newProfile, currentUser: name, tasks: [], habits: [], labels: DEFAULT_LABELS });
+        set({
+            activeProfile: newProfile,
+            currentUser: name,
+            tasks: [],
+            tasksById: {},
+            taskIds: [],
+            tasksByCategory: {},
+            tasksByDate: {},
+            tasksByStatus: { active: [], completed: [] },
+            habits: [],
+            labels: DEFAULT_LABELS
+        });
         await get().saveData();
     },
 
     // Legacy Support (Try to find ID by name or treat as legacy ID)
     setCurrentUser: async (usernameOrId) => {
-        // This is a bit ambiguous now. If called from old code, it expects a username.
-        // We will assume it might be a legacy ID.
-        // Ideally we shouldn't use this anymore.
         set({ currentUser: usernameOrId, activeProfile: { id: usernameOrId, name: usernameOrId } });
         await get().loadData(usernameOrId);
     },
 
     logout: () => {
+        if (saveDebounceTimer) {
+            clearTimeout(saveDebounceTimer);
+            saveDebounceTimer = null;
+        }
         WidgetService.clearWidgetData();
-        set({ activeProfile: null, currentUser: null, tasks: [], habits: [] });
+        set({
+            activeProfile: null,
+            currentUser: null,
+            tasks: [],
+            tasksById: {},
+            taskIds: [],
+            tasksByCategory: {},
+            tasksByDate: {},
+            tasksByStatus: { active: [], completed: [] },
+            habits: []
+        });
     },
 
     loadData: async (id) => {
         const data = await StorageService.loadUserData(id);
         if (data) {
-            const tasks = data.tasks || [];
+            const loadedTasks: Task[] = data.tasks || [];
+            const normalized = buildNormalizedTasks(loadedTasks);
             const habits = data.habits || [];
             set({
-                // If the loaded data has a name, update our state
                 activeProfile: { id: id, name: data.name || get().activeProfile?.name || id },
                 currentUser: data.name || get().currentUser,
-                tasks,
+                tasks: loadedTasks,
+                tasksById: normalized.byId,
+                taskIds: normalized.allIds,
+                tasksByCategory: normalized.byCategory,
+                tasksByDate: normalized.byDate,
+                tasksByStatus: normalized.byStatus,
                 habits,
                 labels: data.labels && Array.isArray(data.labels) && typeof data.labels[0] === 'object'
                     ? data.labels
                     : (data.labels || DEFAULT_LABELS).map((l: any) => typeof l === 'string' ? { id: Math.random().toString(36).substr(2, 9), name: l } : l)
             });
-            // Update widget with loaded data
             const loadedLabels = data.labels && Array.isArray(data.labels) ? data.labels : DEFAULT_LABELS;
-            WidgetService.updateWidget(tasks, habits, loadedLabels, get().activeTimer);
+            WidgetService.updateWidget(loadedTasks, habits, loadedLabels, get().activeTimer);
         } else {
-            set({ tasks: [], habits: [] });
+            set({
+                tasks: [],
+                tasksById: {},
+                taskIds: [],
+                tasksByCategory: {},
+                tasksByDate: {},
+                tasksByStatus: { active: [], completed: [] },
+                habits: []
+            });
             WidgetService.updateWidget([], [], DEFAULT_LABELS, null);
         }
     },
 
     saveData: async () => {
-        const { activeProfile, tasks, habits, labels } = get();
+        if (saveDebounceTimer) {
+            clearTimeout(saveDebounceTimer);
+            saveDebounceTimer = null;
+        }
+        const state = get();
+        const { activeProfile, habits, labels, tasksById, taskIds, tasksByCategory, tasksByDate, tasksByStatus } = state;
         if (activeProfile) {
+            const allTasks = getTasksArray({
+                byId: tasksById,
+                allIds: taskIds,
+                byCategory: tasksByCategory,
+                byDate: tasksByDate,
+                byStatus: tasksByStatus
+            });
             const dataToSave = {
                 id: activeProfile.id,
                 name: activeProfile.name,
-                tasks,
+                tasks: allTasks,
                 habits,
                 labels
             };
             await StorageService.saveUserData(activeProfile.id, dataToSave);
-            WidgetService.updateWidget(tasks, habits, labels, get().activeTimer);
+            WidgetService.updateWidget(allTasks, habits, labels, state.activeTimer);
         }
     },
 
     addTask: (task) => {
         const newId = Math.random().toString(36).substr(2, 9);
-        set((state) => ({
-            tasks: [...state.tasks, {
-                ...task,
-                id: newId,
-                completed: false,
-                subtasks: task.subtasks || []
-            }]
-        }));
-        get().saveData();
+        const newTask: Task = {
+            ...task,
+            id: newId,
+            completed: false,
+            subtasks: task.subtasks || []
+        };
+
+        set((state) => {
+            const currentNormalized: NormalizedTaskState = {
+                byId: state.tasksById,
+                allIds: state.taskIds,
+                byCategory: state.tasksByCategory,
+                byDate: state.tasksByDate,
+                byStatus: state.tasksByStatus
+            };
+            const updated = addTaskToNormalized(currentNormalized, newTask);
+            return {
+                tasksById: updated.byId,
+                taskIds: updated.allIds,
+                tasksByCategory: updated.byCategory,
+                tasksByDate: updated.byDate,
+                tasksByStatus: updated.byStatus
+            };
+        });
+        scheduleSave(get);
 
         // Schedule reminders for this task
         if (task.reminders && task.reminders.length > 0) {
@@ -222,13 +317,27 @@ export const useAppStore = create<AppState>((set, get) => ({
     },
 
     updateTask: (id, updates) => {
-        set((state) => ({
-            tasks: state.tasks.map(t => t.id === id ? { ...t, ...updates } : t)
-        }));
-        get().saveData();
+        set((state) => {
+            const currentNormalized: NormalizedTaskState = {
+                byId: state.tasksById,
+                allIds: state.taskIds,
+                byCategory: state.tasksByCategory,
+                byDate: state.tasksByDate,
+                byStatus: state.tasksByStatus
+            };
+            const updated = updateTaskInNormalized(currentNormalized, id, updates);
+            return {
+                tasksById: updated.byId,
+                taskIds: updated.allIds,
+                tasksByCategory: updated.byCategory,
+                tasksByDate: updated.byDate,
+                tasksByStatus: updated.byStatus
+            };
+        });
+        scheduleSave(get);
 
         // Re-schedule reminders if task details changed
-        const updatedTask = get().tasks.find(t => t.id === id);
+        const updatedTask = get().tasksById[id];
         if (updatedTask && updatedTask.reminders && updatedTask.reminders.length > 0) {
             notificationService.scheduleTaskReminders(updatedTask);
         }
@@ -236,15 +345,27 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     toggleTask: (id) => {
         set((state) => {
-            const task = state.tasks.find(t => t.id === id);
+            const task = state.tasksById[id];
             if (task && !task.completed) {
                 SoundService.playSound('complete');
             }
+            const currentNormalized: NormalizedTaskState = {
+                byId: state.tasksById,
+                allIds: state.taskIds,
+                byCategory: state.tasksByCategory,
+                byDate: state.tasksByDate,
+                byStatus: state.tasksByStatus
+            };
+            const { newState: updated } = toggleTaskInNormalized(currentNormalized, id);
             return {
-                tasks: state.tasks.map((t) => t.id === id ? { ...t, completed: !t.completed } : t)
+                tasksById: updated.byId,
+                taskIds: updated.allIds,
+                tasksByCategory: updated.byCategory,
+                tasksByDate: updated.byDate,
+                tasksByStatus: updated.byStatus
             };
         });
-        get().saveData();
+        scheduleSave(get);
     },
 
     deleteTask: (id) => {
@@ -252,24 +373,38 @@ export const useAppStore = create<AppState>((set, get) => ({
         notificationService.cancelTaskReminders(id);
         SoundService.playSound('delete');
 
-        set((state) => ({
-            tasks: state.tasks.filter((t) => t.id !== id)
-        }));
-        get().saveData();
+        set((state) => {
+            const currentNormalized: NormalizedTaskState = {
+                byId: state.tasksById,
+                allIds: state.taskIds,
+                byCategory: state.tasksByCategory,
+                byDate: state.tasksByDate,
+                byStatus: state.tasksByStatus
+            };
+            const { newState: updated } = deleteTaskFromNormalized(currentNormalized, id);
+            return {
+                tasksById: updated.byId,
+                taskIds: updated.allIds,
+                tasksByCategory: updated.byCategory,
+                tasksByDate: updated.byDate,
+                tasksByStatus: updated.byStatus
+            };
+        });
+        scheduleSave(get);
     },
 
     addLabel: (name) => {
         set((state) => ({
             labels: [...state.labels, { id: Math.random().toString(36).substr(2, 9), name }]
         }));
-        get().saveData();
+        scheduleSave(get);
     },
 
     deleteLabel: (id) => {
         set((state) => ({
             labels: state.labels.filter((l) => l.id !== id)
         }));
-        get().saveData();
+        scheduleSave(get);
     },
 
     addHabit: (habit) => {
@@ -285,7 +420,7 @@ export const useAppStore = create<AppState>((set, get) => ({
                 bestStreak: 0,
             }]
         }));
-        get().saveData();
+        scheduleSave(get);
 
         // Schedule reminders for this habit
         if (habit.reminders && habit.reminders.length > 0) {
@@ -355,7 +490,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             });
             return { habits };
         });
-        get().saveData();
+        scheduleSave(get);
     },
 
     updateNumericProgress: (id, date, amount) => {
@@ -366,7 +501,6 @@ export const useAppStore = create<AppState>((set, get) => ({
                     const newProgress = Math.max(0, currentProgress + amount);
                     const numericProgress = { ...h.numericProgress, [date]: newProgress };
 
-                    // Check if goal reached to update completedDates
                     const isCompleted = h.completedDates.includes(date);
                     const goalReached = newProgress >= (h.numericGoal || 1);
                     let newCompletedDates = [...h.completedDates];
@@ -377,20 +511,12 @@ export const useAppStore = create<AppState>((set, get) => ({
                         newCompletedDates = newCompletedDates.filter(d => d !== date);
                     }
 
-                    // For numeric habits, we don't recalculate streak here because toggleHabit handles it via completedDates
-                    // But we SHOULD trigger the same streak logic if completedDates changed.
-                    // Instead of duplicating, we'll let the component call toggleHabit or we can refactor.
-                    // For now, let's just update the habit.
-
                     return { ...h, numericProgress, completedDates: newCompletedDates };
                 }
                 return h;
             });
             return { habits };
         });
-        // We need to trigger streak recalculation if completedDates changed
-        // Actually, let's just call toggleHabit internally if we want, or just re-calc here.
-        // I'll re-run streak calc for consistency.
         set((state) => ({
             habits: state.habits.map(h => {
                 if (h.id === id) {
@@ -418,7 +544,7 @@ export const useAppStore = create<AppState>((set, get) => ({
                 return h;
             })
         }));
-        get().saveData();
+        scheduleSave(get);
     },
 
     updateTimerProgress: (id, date, seconds) => {
@@ -445,7 +571,6 @@ export const useAppStore = create<AppState>((set, get) => ({
             });
             return { habits };
         });
-        // Streak logic again
         set((state) => ({
             habits: state.habits.map(h => {
                 if (h.id === id) {
@@ -473,14 +598,14 @@ export const useAppStore = create<AppState>((set, get) => ({
                 return h;
             })
         }));
-        get().saveData();
+        scheduleSave(get);
     },
 
     updateHabit: (id, updates) => {
         set((state) => ({
             habits: state.habits.map(h => h.id === id ? { ...h, ...updates } : h)
         }));
-        get().saveData();
+        scheduleSave(get);
     },
 
     updateSensorProgress: (id, date, value) => {
@@ -490,7 +615,6 @@ export const useAppStore = create<AppState>((set, get) => ({
                     const numericProgress = { ...h.numericProgress };
                     numericProgress[date] = value;
 
-                    // Simple completion logic: if current value >= goal, mark completed
                     let newCompletedDates = [...h.completedDates];
                     const goalReached = value >= (h.numericGoal || 1);
                     const isCompleted = newCompletedDates.includes(date);
@@ -506,7 +630,6 @@ export const useAppStore = create<AppState>((set, get) => ({
                 return h;
             })
         }));
-        // Re-calculate streak (can be refactored into a reusable helper)
         set((state) => ({
             habits: state.habits.map(h => {
                 if (h.id === id) {
@@ -534,39 +657,38 @@ export const useAppStore = create<AppState>((set, get) => ({
                 return h;
             })
         }));
-        get().saveData();
+        scheduleSave(get);
     },
 
     deleteHabit: (id) => {
-        // Cancel first
         notificationService.cancelHabitReminders(id);
         SoundService.playSound('delete');
 
         set((state) => ({
             habits: state.habits.filter((h) => h.id !== id)
         }));
-        get().saveData();
+        scheduleSave(get);
     },
 
     startTimer: (id, title, type, goal) => {
         set({ activeTimer: { id, title, type, timeLeft: goal, goal, isRunning: true } });
-        get().saveData();
+        scheduleSave(get);
     },
     pauseTimer: () => {
         set((state) => ({
             activeTimer: state.activeTimer ? { ...state.activeTimer, isRunning: false } : null
         }));
-        get().saveData();
+        scheduleSave(get);
     },
     resumeTimer: () => {
         set((state) => ({
             activeTimer: state.activeTimer ? { ...state.activeTimer, isRunning: true } : null
         }));
-        get().saveData();
+        scheduleSave(get);
     },
     stopTimer: () => {
         set({ activeTimer: null });
-        get().saveData();
+        scheduleSave(get);
     },
     tickTimer: () => {
         set((state) => {

@@ -72,6 +72,8 @@ export interface DueDateModalProps {
     setCurrentMonth: (m: dayjs.Dayjs) => void;
     isRepeatEnabled: boolean;
     setIsRepeatEnabled: (v: boolean) => void;
+    repeatType?: 'daily' | 'weekly' | 'monthly';
+    setRepeatType?: (t: 'daily' | 'weekly' | 'monthly') => void;
     onAddTime: () => void;
 }
 

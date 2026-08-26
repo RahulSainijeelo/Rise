@@ -9,7 +9,9 @@ buildscript {
     }
     repositories {
         google()
-        mavenCentral()
+        maven { url "https://maven.aliyun.com/repository/central" }
+        maven { url "https://repo.huaweicloud.com/repository/maven/" }
+        maven { url "https://repo1.maven.org/maven2/" }
     }
     dependencies {
         classpath("com.android.tools.build:gradle")

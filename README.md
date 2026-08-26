@@ -9,8 +9,6 @@
 ---
 
 [![React Native](https://img.shields.io/badge/React_Native-0.76+-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://reactnative.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-007ACC?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Android](https://img.shields.io/badge/Android-Widgets_RemoteViews-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://developer.android.com)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-D71921?style=for-the-badge)](LICENSE)
 
 <br/>

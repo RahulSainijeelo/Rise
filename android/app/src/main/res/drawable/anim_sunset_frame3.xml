@@ -1,0 +1,13 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp"
+    android:height="40dp"
+    android:viewportWidth="64"
+    android:viewportHeight="40">
+    <!-- Horizon -->
+    <path android:fillColor="#666666" android:pathData="M12,26h40v2h-40z" />
+    <!-- Sun Set Below Horizon Glow -->
+    <path android:fillColor="#D71921" android:pathData="M28,26a4,4 0 0,1 8,0z" />
+    <!-- Night Stars / Moon Dot -->
+    <path android:fillColor="#FFFFFF" android:pathData="M44,10h3v3h-3z M20,12h2v2h-2z M36,8h2v2h-2z" />
+    <path android:fillColor="#222222" android:pathData="M26,31h12v2h-12z" />
+</vector>

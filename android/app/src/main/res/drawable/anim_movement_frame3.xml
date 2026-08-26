@@ -1,0 +1,9 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp"
+    android:height="40dp"
+    android:viewportWidth="64"
+    android:viewportHeight="40">
+    <!-- Kinetic Impact Ground Burst -->
+    <path android:fillColor="#FFFFFF" android:pathData="M34,8l-8,14h7l-4,12l12,-16h-7z" />
+    <path android:fillColor="#D71921" android:pathData="M18,34h6v2h-6z M40,34h6v2h-6z M28,34h8v2h-8z" />
+</vector>

@@ -1,0 +1,13 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp"
+    android:height="40dp"
+    android:viewportWidth="64"
+    android:viewportHeight="40">
+    <!-- Horizon -->
+    <path android:fillColor="#FFFFFF" android:pathData="M12,26h40v2h-40z" />
+    <!-- Sun Setting Half -->
+    <path android:fillColor="#D71921" android:pathData="M24,26a8,8 0 0,1 16,0z" />
+    <!-- Twilight Glow Dots -->
+    <path android:fillColor="#777777" android:pathData="M16,16h2v2h-2z M46,16h2v2h-2z" />
+    <path android:fillColor="#444444" android:pathData="M22,31h20v2h-20z" />
+</vector>

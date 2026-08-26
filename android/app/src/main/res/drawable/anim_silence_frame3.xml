@@ -1,0 +1,9 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp"
+    android:height="40dp"
+    android:viewportWidth="64"
+    android:viewportHeight="40">
+    <!-- Flat Quiet Line Equalizer -->
+    <path android:fillColor="#222222" android:pathData="M14,19h4v2h-4z M22,19h4v2h-4z M30,19h4v2h-4z M38,19h4v2h-4z M46,19h4v2h-4z" />
+    <path android:fillColor="#D71921" android:pathData="M30,18h4v4h-4z" />
+</vector>

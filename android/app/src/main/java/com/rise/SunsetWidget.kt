@@ -30,7 +30,13 @@ class SunsetWidget : AppWidgetProvider() {
     companion object {
         fun updateWidget(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int) {
             val views = RemoteViews(context.packageName, R.layout.widget_habit_sensor)
+            views.setTextViewText(R.id.habit_title, "DIGITAL SUNSET")
             views.setImageViewResource(R.id.app_logo, R.drawable.widget_icon_sunset)
+            views.setImageViewResource(R.id.habit_empty_icon, R.drawable.widget_icon_sunset)
+            views.setImageViewResource(R.id.habit_anim_frame1, R.drawable.anim_sunset_frame1)
+            views.setImageViewResource(R.id.habit_anim_frame2, R.drawable.anim_sunset_frame2)
+            views.setImageViewResource(R.id.habit_anim_frame3, R.drawable.anim_sunset_frame3)
+
             val sharedPref = context.getSharedPreferences("RiseWidgetPrefs", Context.MODE_PRIVATE)
             val sensorDataStr = sharedPref.getString("sensorData", "{}") ?: "{}"
             
@@ -38,16 +44,13 @@ class SunsetWidget : AppWidgetProvider() {
                 val sensorData = JSONObject(sensorDataStr)
                 val habitData = sensorData.optJSONObject("screen")
                 
-                if (habitData != null && habitData.optBoolean("exists", true)) {
+                if (habitData != null && habitData.optBoolean("exists", false)) {
                     val isCompleted = habitData.optBoolean("isCompleted", false)
                     val habitId = habitData.optString("id", "")
 
                     views.setViewVisibility(R.id.habit_content, View.VISIBLE)
-                    views.setViewVisibility(R.id.habit_progress, View.VISIBLE)
-                    views.setViewVisibility(R.id.habit_goal_text, View.VISIBLE)
-                    views.setViewVisibility(R.id.habit_empty_btn, View.GONE)
+                    views.setViewVisibility(R.id.habit_empty_container, View.GONE)
                     
-                    views.setTextViewText(R.id.habit_title, "DIGITAL SUNSET")
                     views.setTextViewText(R.id.sensor_value, if (isCompleted) "DONE" else "ACTIVE")
                     views.setTextViewText(R.id.sensor_unit, "PHONE USAGE")
                     
@@ -59,21 +62,19 @@ class SunsetWidget : AppWidgetProvider() {
                         data = Uri.parse("rise://item/$habitId/habit")
                         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                     }
-                    views.setOnClickPendingIntent(R.id.habit_content, PendingIntent.getActivity(context, 500, intent, 
+                    views.setOnClickPendingIntent(R.id.habit_content, PendingIntent.getActivity(context, 500 + appWidgetId, intent, 
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
                 } else {
                     views.setViewVisibility(R.id.habit_content, View.GONE)
-                    views.setViewVisibility(R.id.habit_progress, View.GONE)
-                    views.setViewVisibility(R.id.habit_goal_text, View.GONE)
-                    views.setViewVisibility(R.id.habit_empty_btn, View.VISIBLE)
-                    views.setTextViewText(R.id.habit_empty_btn, "+ ADD SUNSET HABIT")
+                    views.setViewVisibility(R.id.habit_empty_container, View.VISIBLE)
+                    views.setTextViewText(R.id.habit_empty_btn, "+ LINK SUNSET")
                     
                     val intent = Intent(context, MainActivity::class.java).apply {
                         action = Intent.ACTION_VIEW
                         data = Uri.parse("rise://add-sensor-habit/digital_sunset")
                         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                     }
-                    views.setOnClickPendingIntent(R.id.habit_empty_btn, PendingIntent.getActivity(context, 501, intent, 
+                    views.setOnClickPendingIntent(R.id.habit_empty_container, PendingIntent.getActivity(context, 501 + appWidgetId, intent, 
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
                 }
             } catch (e: Exception) { Log.e("SunsetWidget", "Error", e) }

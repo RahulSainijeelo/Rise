@@ -1,0 +1,9 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp"
+    android:height="40dp"
+    android:viewportWidth="64"
+    android:viewportHeight="40">
+    <!-- Calm Low Equalizer -->
+    <path android:fillColor="#444444" android:pathData="M14,18h4v4h-4z M22,16h4v8h-4z M30,14h4v12h-4z M38,16h4v8h-4z M46,18h4v4h-4z" />
+    <path android:fillColor="#D71921" android:pathData="M30,18h4v4h-4z" />
+</vector>

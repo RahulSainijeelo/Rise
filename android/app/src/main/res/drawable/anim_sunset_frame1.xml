@@ -1,0 +1,12 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp"
+    android:height="40dp"
+    android:viewportWidth="64"
+    android:viewportHeight="40">
+    <!-- Horizon -->
+    <path android:fillColor="#FFFFFF" android:pathData="M12,26h40v2h-40z" />
+    <!-- Sun High -->
+    <path android:fillColor="#D71921" android:pathData="M32,18m-7,0a7,7 0 1,0 14,0a7,7 0 1,0 -14,0" />
+    <!-- Sun Ray Dots -->
+    <path android:fillColor="#FFFFFF" android:pathData="M31,6h2v3h-2z M20,10h2v2h-2z M42,10h2v2h-2z" />
+</vector>

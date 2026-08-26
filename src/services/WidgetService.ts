@@ -112,22 +112,40 @@ export const WidgetService = {
                 WidgetBridge.setHabitHistoryData(JSON.stringify(habitHistory));
             }
 
-            // Dedicated payload for the 5 new sensor widgets
+            // Dedicated payload for the 5 sensor widgets
             const sensorData: any = {};
             const sensorTypes = ['pedometer', 'gps', 'noise', 'movement', 'screen'];
 
             sensorTypes.forEach(type => {
-                const habit = (habits || []).find(h => h.sensorType === type);
+                const habit = (habits || []).find((h: any) => {
+                    if (h.sensorType === type) return true;
+                    const lowerTitle = (h.title || '').toLowerCase();
+                    if (type === 'pedometer' && (lowerTitle.includes('step') || lowerTitle.includes('walk') || h.sensorType === 'pedometer')) return true;
+                    if (type === 'gps' && (lowerTitle.includes('glider') || lowerTitle.includes('city') || lowerTitle.includes('distance') || lowerTitle.includes('bike') || h.sensorType === 'gps')) return true;
+                    if (type === 'noise' && (lowerTitle.includes('silence') || lowerTitle.includes('quiet') || lowerTitle.includes('meditation') || h.sensorType === 'noise')) return true;
+                    if (type === 'movement' && (lowerTitle.includes('rise') || lowerTitle.includes('immediate') || lowerTitle.includes('snooze') || h.sensorType === 'movement')) return true;
+                    if (type === 'screen' && (lowerTitle.includes('sunset') || lowerTitle.includes('phone') || lowerTitle.includes('night') || h.sensorType === 'screen')) return true;
+                    return false;
+                });
+
                 if (habit) {
                     let progress = habit.numericProgress?.[today] || 0;
-                    let goal = habit.numericGoal || 1;
+                    let goal = habit.numericGoal || (habit.type === 'timer' ? (habit.timerGoal || 3600) : 1);
                     let unit = habit.numericUnit || '';
 
-                    // For Check habits like movement/screen, use steps or completion
-                    if (type === 'movement') {
-                        progress = habit.numericProgress?.[today] || 0;
-                        goal = 50;
-                        unit = 'steps';
+                    if (type === 'gps') {
+                        if (!unit) unit = 'KM';
+                        if (!habit.numericGoal) goal = 2.0;
+                    } else if (type === 'movement') {
+                        goal = habit.numericGoal || 50;
+                        unit = 'STEPS';
+                    } else if (type === 'noise') {
+                        goal = habit.timerGoal || 3600;
+                        unit = 'MINUTES';
+                        progress = habit.timerProgress?.[today] || progress;
+                    } else if (type === 'pedometer') {
+                        goal = habit.numericGoal || 10000;
+                        unit = 'STEPS';
                     }
 
                     sensorData[type] = {
@@ -136,6 +154,7 @@ export const WidgetService = {
                         progress,
                         goal,
                         unit,
+                        exists: true,
                         isCompleted: habit.completedDates?.includes(today) || false
                     };
                 } else {
@@ -146,7 +165,6 @@ export const WidgetService = {
             if (typeof WidgetBridge.setSensorData === 'function') {
                 WidgetBridge.setSensorData(JSON.stringify(sensorData));
             } else {
-                // Fallback: Store in general data if dedicated method not yet in native bridge
                 WidgetBridge.setWidgetData(JSON.stringify({ ...limitedItems, sensorData }));
             }
         } catch (e) {

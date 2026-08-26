@@ -1,0 +1,13 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp"
+    android:height="40dp"
+    android:viewportWidth="64"
+    android:viewportHeight="40">
+    <!-- Grid dots -->
+    <path android:fillColor="#333333" android:pathData="M12,12h2v2h-2z M24,12h2v2h-2z M36,12h2v2h-2z M48,12h2v2h-2z" />
+    <path android:fillColor="#333333" android:pathData="M12,20h2v2h-2z M24,20h2v2h-2z M36,20h2v2h-2z M48,20h2v2h-2z" />
+    <path android:fillColor="#333333" android:pathData="M12,28h2v2h-2z M24,28h2v2h-2z M36,28h2v2h-2z M48,28h2v2h-2z" />
+    <!-- Glider at Frame 1 (top-left) -->
+    <path android:fillColor="#D71921" android:pathData="M18,10l10,6l-10,6l3,-6z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M12,15h3v2h-3z" />
+</vector>

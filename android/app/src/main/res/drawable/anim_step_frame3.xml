@@ -1,0 +1,12 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp"
+    android:height="40dp"
+    android:viewportWidth="64"
+    android:viewportHeight="40">
+    <!-- Stride Pulse -->
+    <path android:fillColor="#FFFFFF" android:pathData="M48,20c0,3 -2,5 -4,5s-4,-2 -4,-5c0,-4 2,-8 4,-8s4,4 4,8z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M48,30c0,2.5 -2,4 -4,4s-4,-1.5 -4,-4c0,-2.5 2,-3.5 4,-3.5s4,1 4,3.5z" />
+    <!-- Pulse Wave Dots -->
+    <path android:fillColor="#D71921" android:pathData="M16,35h32v2h-32z" />
+    <path android:fillColor="#777777" android:pathData="M24,38h16v2h-16z" />
+</vector>

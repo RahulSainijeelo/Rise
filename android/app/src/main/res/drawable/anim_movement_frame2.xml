@@ -1,0 +1,9 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp"
+    android:height="40dp"
+    android:viewportWidth="64"
+    android:viewportHeight="40">
+    <!-- Full Lightning Bolt Surge -->
+    <path android:fillColor="#D71921" android:pathData="M35,4l-12,18h10l-4,16l18,-22h-11z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M20,12h3v3h-3z M44,28h3v3h-3z" />
+</vector>

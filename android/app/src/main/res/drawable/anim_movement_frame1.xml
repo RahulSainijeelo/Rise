@@ -1,0 +1,9 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp"
+    android:height="40dp"
+    android:viewportWidth="64"
+    android:viewportHeight="40">
+    <!-- Kinetic Spark Top -->
+    <path android:fillColor="#FFFFFF" android:pathData="M31,6h2v4h-2z M27,8h2v2h-2z M35,8h2v2h-2z" />
+    <path android:fillColor="#D71921" android:pathData="M33,10l-6,11h6l-3,11l10,-14h-6z" />
+</vector>

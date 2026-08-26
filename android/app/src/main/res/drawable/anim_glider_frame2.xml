@@ -1,0 +1,14 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp"
+    android:height="40dp"
+    android:viewportWidth="64"
+    android:viewportHeight="40">
+    <!-- Grid dots -->
+    <path android:fillColor="#333333" android:pathData="M12,12h2v2h-2z M24,12h2v2h-2z M36,12h2v2h-2z M48,12h2v2h-2z" />
+    <path android:fillColor="#333333" android:pathData="M12,20h2v2h-2z M24,20h2v2h-2z M36,20h2v2h-2z M48,20h2v2h-2z" />
+    <path android:fillColor="#333333" android:pathData="M12,28h2v2h-2z M24,28h2v2h-2z M36,28h2v2h-2z M48,28h2v2h-2z" />
+    <!-- Glider at Frame 2 (center speed glide) -->
+    <path android:fillColor="#D71921" android:pathData="M28,14l12,6l-12,6l4,-6z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M16,19h8v2h-8z" />
+    <path android:fillColor="#D71921" android:pathData="M10,19h4v2h-4z" />
+</vector>

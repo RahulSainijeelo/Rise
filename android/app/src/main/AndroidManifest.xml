@@ -39,7 +39,9 @@
       </activity>
       <receiver
         android:name="com.rise.RiseWidget"
-        android:exported="true">
+        android:exported="true"
+        android:label="@string/widget_tasks_label"
+        android:icon="@drawable/widget_icon_tasks">
         <intent-filter>
             <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
         </intent-filter>
@@ -54,32 +56,56 @@
             android:resource="@xml/rise_widget_info" />
       </receiver>
 
-      <receiver android:name="com.rise.StepWidget" android:exported="true" android:label="Rise: Steps">
+      <receiver
+        android:name="com.rise.StepWidget"
+        android:exported="true"
+        android:label="@string/widget_step_label"
+        android:icon="@drawable/widget_icon_steps">
         <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
         <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_step_info" />
       </receiver>
 
-      <receiver android:name="com.rise.DistanceWidget" android:exported="true" android:label="Rise: Distance">
+      <receiver
+        android:name="com.rise.DistanceWidget"
+        android:exported="true"
+        android:label="@string/widget_distance_label"
+        android:icon="@drawable/widget_icon_distance">
         <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
         <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_distance_info" />
       </receiver>
 
-      <receiver android:name="com.rise.SilenceWidget" android:exported="true" android:label="Rise: Silence">
+      <receiver
+        android:name="com.rise.SilenceWidget"
+        android:exported="true"
+        android:label="@string/widget_silence_label"
+        android:icon="@drawable/widget_icon_silence">
         <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
         <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_silence_info" />
       </receiver>
 
-      <receiver android:name="com.rise.MovementWidget" android:exported="true" android:label="Rise: Movement">
+      <receiver
+        android:name="com.rise.MovementWidget"
+        android:exported="true"
+        android:label="@string/widget_movement_label"
+        android:icon="@drawable/widget_icon_movement">
         <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
         <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_movement_info" />
       </receiver>
 
-      <receiver android:name="com.rise.SunsetWidget" android:exported="true" android:label="Rise: Sunset">
+      <receiver
+        android:name="com.rise.SunsetWidget"
+        android:exported="true"
+        android:label="@string/widget_sunset_label"
+        android:icon="@drawable/widget_icon_sunset">
         <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
         <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_sunset_info" />
       </receiver>
 
-      <receiver android:name="com.rise.TaskTimerWidget" android:exported="true" android:label="Rise: Timer">
+      <receiver
+        android:name="com.rise.TaskTimerWidget"
+        android:exported="true"
+        android:label="@string/widget_timer_label"
+        android:icon="@drawable/widget_icon_timer">
         <intent-filter>
             <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             <action android:name="com.rise.TIMER_ACTION" />
@@ -87,7 +113,11 @@
         <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_timer_info" />
       </receiver>
 
-      <receiver android:name="com.rise.HabitControlWidget" android:exported="true" android:label="Rise: Habit">
+      <receiver
+        android:name="com.rise.HabitControlWidget"
+        android:exported="true"
+        android:label="@string/widget_habits_label"
+        android:icon="@drawable/widget_icon_habits">
         <intent-filter>
             <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             <action android:name="com.rise.TOGGLE_HABIT_WIDGET" />

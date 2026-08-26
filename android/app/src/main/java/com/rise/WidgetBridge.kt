@@ -72,6 +72,21 @@ class WidgetBridge(reactContext: ReactApplicationContext) : ReactContextBaseJava
     }
 
     @ReactMethod
+    fun setWidgetLabel(label: String) {
+        try {
+            Log.d("WidgetBridge", "Setting selected widget label: $label")
+            val sharedPref = reactApplicationContext.getSharedPreferences("RiseWidgetPrefs", Context.MODE_PRIVATE)
+            with(sharedPref.edit()) {
+                putString("selectedLabel", label)
+                apply()
+            }
+            notifyWidgetUpdate()
+        } catch (e: Exception) {
+            Log.e("WidgetBridge", "Error setting selected label", e)
+        }
+    }
+
+    @ReactMethod
     fun setSensorData(data: String) {
         try {
             Log.d("WidgetBridge", "Setting sensor data: $data")

@@ -5,5 +5,7 @@
     android:minHeight="110dp"
     android:updatePeriodMillis="86400000"
     android:resizeMode="horizontal|vertical"
-    android:widgetCategory="home_screen">
+    android:widgetCategory="home_screen"
+    android:previewImage="@drawable/widget_icon_movement"
+    android:description="@string/widget_movement_desc">
 </appwidget-provider>

@@ -1,3 +1,28 @@
 <resources>
     <string name="app_name">Rise</string>
+
+    <!-- Widget Names & Descriptions -->
+    <string name="widget_tasks_label">Rise: Tasks</string>
+    <string name="widget_tasks_desc">Quick access to your daily tasks and habit checkpoints.</string>
+
+    <string name="widget_habits_label">Rise: Habit Matrix</string>
+    <string name="widget_habits_desc">Interactive habit heatmap and streak tracker.</string>
+
+    <string name="widget_timer_label">Rise: Focus Timer</string>
+    <string name="widget_timer_desc">Quick task focus timer with pause, resume, and switch controls.</string>
+
+    <string name="widget_step_label">Rise: Step Legend</string>
+    <string name="widget_step_desc">Daily step tracking with real-time progress bar.</string>
+
+    <string name="widget_distance_label">Rise: City Glider</string>
+    <string name="widget_distance_desc">Active commute and distance tracker.</string>
+
+    <string name="widget_silence_label">Rise: Deep Silence</string>
+    <string name="widget_silence_desc">Quiet focus environment timer and tracker.</string>
+
+    <string name="widget_movement_label">Rise: Immediate Rise</string>
+    <string name="widget_movement_desc">Instant morning movement and anti-snooze tracker.</string>
+
+    <string name="widget_sunset_label">Rise: Digital Sunset</string>
+    <string name="widget_sunset_desc">Evening screen-off and wind-down tracker.</string>
 </resources>

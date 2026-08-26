@@ -88,7 +88,7 @@ class RiseWidgetFactory(private val context: Context) : RemoteViewsService.Remot
                     dueDate = obj.optString("dueDate", ""),
                     dueTime = dueTime,
                     priority = obj.optInt("priority", 4),
-                    habitType = obj.optString("habitType", null)
+                    habitType = if (obj.has("habitType") && !obj.isNull("habitType")) obj.optString("habitType") else null
                 ))
             }
             
@@ -158,7 +158,9 @@ class RiseWidgetFactory(private val context: Context) : RemoteViewsService.Remot
                 views.setTextColor(R.id.widget_item_title, 0xFF888888.toInt())
                 views.setFloat(R.id.widget_item_title, "setTextSize", 11f)
                 views.setTextViewText(R.id.widget_item_datetime, "")
+                views.setViewVisibility(R.id.widget_item_datetime, View.GONE)
                 views.setTextViewText(R.id.widget_item_type, "")
+                views.setViewVisibility(R.id.widget_item_type, View.GONE)
                 views.setViewVisibility(R.id.widget_item_priority, View.GONE)
                 views.setViewVisibility(R.id.widget_item_checkbox, View.GONE)
                 // Transparent background for headers
@@ -214,6 +216,7 @@ class RiseWidgetFactory(private val context: Context) : RemoteViewsService.Remot
                     }
                 }
                 
+                views.setViewVisibility(R.id.widget_item_type, View.VISIBLE)
                 views.setTextViewText(R.id.widget_item_type, typeIndicator)
                 views.setTextColor(R.id.widget_item_type, 
                     if (item.type == "habit") 0xFFE91E63.toInt() else 0xFF2196F3.toInt())

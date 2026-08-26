@@ -30,7 +30,7 @@ class DistanceWidget : AppWidgetProvider() {
     companion object {
         fun updateWidget(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int) {
             val views = RemoteViews(context.packageName, R.layout.widget_habit_sensor)
-            // Icon removed from layout by user
+            views.setImageViewResource(R.id.app_logo, R.drawable.widget_icon_distance)
             val sharedPref = context.getSharedPreferences("RiseWidgetPrefs", Context.MODE_PRIVATE)
             val sensorDataStr = sharedPref.getString("sensorData", "{}") ?: "{}"
             
@@ -44,6 +44,8 @@ class DistanceWidget : AppWidgetProvider() {
                     val habitId = habitData.optString("id", "")
 
                     views.setViewVisibility(R.id.habit_content, View.VISIBLE)
+                    views.setViewVisibility(R.id.habit_progress, View.VISIBLE)
+                    views.setViewVisibility(R.id.habit_goal_text, View.VISIBLE)
                     views.setViewVisibility(R.id.habit_empty_btn, View.GONE)
                     
                     views.setTextViewText(R.id.habit_title, "CITY GLIDER")
@@ -69,8 +71,10 @@ class DistanceWidget : AppWidgetProvider() {
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
                 } else {
                     views.setViewVisibility(R.id.habit_content, View.GONE)
+                    views.setViewVisibility(R.id.habit_progress, View.GONE)
+                    views.setViewVisibility(R.id.habit_goal_text, View.GONE)
                     views.setViewVisibility(R.id.habit_empty_btn, View.VISIBLE)
-                    views.setTextViewText(R.id.habit_empty_btn, "ADD GLIDER HABIT")
+                    views.setTextViewText(R.id.habit_empty_btn, "+ ADD GLIDER HABIT")
                     
                     val intent = Intent(context, MainActivity::class.java).apply {
                         action = Intent.ACTION_VIEW

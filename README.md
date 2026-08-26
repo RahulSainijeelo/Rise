@@ -1,98 +1,190 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+<div align="center">
 
-# Getting Started
+# RISE
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+**Minimalist Task Mastery | Atomic Habits | Real-Time Sensor Telemetry**
 
-## Step 1: Start Metro
+*Crafted with the Nothing OS aesthetic — dot-matrix typography, monochrome contrast, and dynamic micro-interactions.*
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+---
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+[![React Native](https://img.shields.io/badge/React_Native-0.76+-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://reactnative.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-007ACC?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Android](https://img.shields.io/badge/Android-Widgets_RemoteViews-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://developer.android.com)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-D71921?style=for-the-badge)](LICENSE)
 
-```sh
-# Using npm
+<br/>
+
+<a href="https://github.com/RahulSainijeelo/Rise/releases/latest">
+  <img src="https://img.shields.io/badge/DOWNLOAD_LATEST_RELEASE-APK-D71921?style=for-the-badge&logo=android&logoColor=white" height="42" alt="Download APK" />
+</a>
+
+</div>
+
+---
+
+## Quick Download & Installation
+
+### Option 1: Direct APK Download (Android)
+
+1. Download the latest production APK from the [Releases Page](https://github.com/RahulSainijeelo/Rise/releases/latest).
+2. Open the downloaded file (`Rise.apk`) on your Android device.
+3. If prompted by Android, allow **"Install from unknown sources"** for your browser/file manager.
+4. Tap **Install** and launch **Rise**.
+
+<details>
+<summary><b>Option 2: Installation via ADB (Command Line)</b></summary>
+<br/>
+
+If you have an Android device connected with USB Debugging enabled:
+
+```bash
+# Download latest release APK
+curl -L -o Rise.apk https://github.com/RahulSainijeelo/Rise/releases/latest/download/Rise.apk
+
+# Install to connected device
+adb install -r Rise.apk
+```
+
+</details>
+
+<details>
+<summary><b>Option 3: Build & Install from Source</b></summary>
+<br/>
+
+```bash
+# 1. Clone repository
+git clone https://github.com/RahulSainijeelo/Rise.git
+cd Rise
+
+# 2. Install dependencies
+npm install
+
+# 3. Build and launch on connected Android device
+npm run android
+```
+
+</details>
+
+---
+
+## Overview
+
+Rise is a personal operating system designed to eliminate digital noise and foster intentional productivity. Combining the principles of Atomic Habits with hardware-level sensor verification and native Android home screen widgets, Rise turns daily routines into verified milestones.
+
+---
+
+## Key Features
+
+### 1. High-Performance Task Engine
+- **Normalized Relational Architecture**: Sub-millisecond rendering and zero-lag list manipulation, tested with hundreds of simultaneous tasks.
+- **Organization**: Categorization, custom tags, subtask breakdowns, deadlines, and recurrence rules (daily, weekly, custom intervals).
+- **Nothing-Inspired Interface**: Dot-matrix calendar view, dynamic priority badges, and fluid gesture handling.
+
+### 2. Atomic Habits Framework
+- **The 4 Laws of Behavior Change**: Define custom Cue, Craving, Response, and Reward loops for every habit.
+- **Tracking Modes**:
+  - `Check`: Binary daily commitments.
+  - `Timer`: Focus sessions, meditation, and quiet counters.
+  - `Numeric`: Quantitative tracking (water intake, pages read, repetitions).
+- **Habit Heatmap**: 35-day contribution matrix tracking active days, streaks, and best streaks.
+
+### 3. Hardware-Verified Sensor Habits
+Eliminates self-reporting bias with real-time sensor verification:
+- **Step Legend** *(Pedometer / Accelerometer)*: Tracks daily step cadence.
+- **City Glider** *(High-Precision GPS)*: Measures verified travel and cycling distance.
+- **Deep Silence** *(Decibel Meter / Audio Sensor)*: Measures minutes spent in quiet environments (< 45dB).
+- **Immediate Rise** *(Kinetic Motion)*: Anti-snooze verification requiring physical movement upon waking.
+- **Digital Sunset** *(Screen State)*: Bedtime wind-down habit verifying zero phone usage past curfew.
+
+---
+
+## Android AppWidgets Ecosystem (8 Native Widgets)
+
+Rise provides 8 standalone Android home screen widgets built with native Kotlin `RemoteViews` and real-time SharedPreferences IPC:
+
+| Widget | Purpose | Interactive Action Button | Animation / Visualizer |
+| :--- | :--- | :--- | :--- |
+| **Tasks Matrix** | Daily task tracker | Direct task completion checkboxes | Dynamic priority indicator |
+| **Habit Control** | Pinned habit manager | Toggle habit status | 35-day dot matrix heatmap |
+| **Task Timer** | Focus stopwatch | Play / Pause / Reset | Live ticking second hand |
+| **Step Legend** | Pedometer tracker | `+100 STEPS` quick-add | Stride cadence pulse |
+| **City Glider** | Distance tracker | `TRACK / SYNC` GPS refresh | Radar compass glider sweep |
+| **Deep Silence** | Quiet session logger | `+5M SILENCE` quick-record | Serene soundwave equalizer |
+| **Immediate Rise** | Anti-snooze motion | `RISE NOW` instant check | Kinetic lightning surge |
+| **Digital Sunset** | Bedtime curfew | `WIND DOWN` curfew check | Setting sun horizon sequence |
+
+### Dynamic Widget States
+- **3-Frame Vector Animations**: Auto-looping dot-matrix visuals for in-progress habits.
+- **Celebratory Completion State**: Transforms into an achievement starburst and trophy seal once 100% of the goal is achieved.
+- **Zero-Latency Synchronization**: Direct store hooks push updates instantly from React Native to native widget receivers.
+
+---
+
+## Technical Stack
+
+- **Framework**: React Native 0.76 (Fabric and TurboModules enabled)
+- **Languages**: TypeScript 5.x and Kotlin (Native Bridge / RemoteViews)
+- **State Management**: Zustand with custom normalized dictionary indices
+- **Hardware & Telemetry**: `react-native-sensors`, `react-native-geolocation-service`, `react-native-sound-level`
+- **Audio Engine**: `react-native-sound-player`
+- **Notifications**: `@notifee/react-native`
+- **Storage**: AsyncStorage and Encrypted SharedPreferences IPC
+
+---
+
+## Development Setup
+
+### Prerequisites
+- Node.js >= 18
+- JDK 17+
+- Android Studio & Android SDK (API 34)
+
+### Local Development Commands
+
+```bash
+# 1. Install dependencies
+npm install
+
+# 2. Start Metro bundler
 npm start
 
-# OR using Yarn
-yarn start
-```
-
-## Step 2: Build and run your app
-
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
-
-### Android
-
-```sh
-# Using npm
+# 3. Run on Android device or emulator
 npm run android
-
-# OR using Yarn
-yarn android
 ```
 
-### iOS
+---
 
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
+## Production Build
 
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
+To build production APK and AAB binaries locally:
 
-```sh
-bundle install
+```bash
+cd android
+
+# Clean build cache
+./gradlew clean
+
+# Build Universal Release APK
+./gradlew assembleRelease
+
+# Build Google Play Bundle (AAB)
+./gradlew bundleRelease
 ```
 
-Then, and every time you update your native dependencies, run:
+Generated binary locations:
+- **APK**: `android/app/build/outputs/apk/release/app-release.apk`
+- **AAB**: `android/app/build/outputs/bundle/release/app-release.aab`
 
-```sh
-bundle exec pod install
-```
+---
 
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
+## License
 
-```sh
-# Using npm
-npm run ios
+**Copyright (c) 2026 Rahul Saini (jeelo).**
 
-# OR using Yarn
-yarn ios
-```
+This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**.
 
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
-
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
-
-## Step 3: Modify your app
-
-Now that you have successfully run the app, let's make changes!
-
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
-
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
-
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
-
-## Congratulations! :tada:
-
-You've successfully run and modified your React Native App. :partying_face:
-
-### Now what?
-
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
-
-# Troubleshooting
-
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
-# Rise
+Under this license:
+- Anyone who modifies or distributes this software must disclose the complete source code under the same GPL-3.0 license.
+- No closed-source, proprietary, or commercial forks may be created without preserving complete source disclosure and original author attribution.
+- See the [LICENSE](LICENSE) file for the full legal terms and conditions.

@@ -7,6 +7,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { notificationService } from './src/services/NotificationService';
 import { useAppStore } from './src/store/useAppStore';
 import { SettingsService } from './src/services/SettingsService';
+import { sensorService } from './src/services/SensorService';
 
 const { WidgetBridge } = NativeModules;
 const widgetEmitter = new NativeEventEmitter(WidgetBridge);
@@ -31,12 +32,10 @@ const App = () => {
       if (!activeProfile) {
         const settings = await SettingsService.getSettings();
         if (settings.defaultProfile) {
-          // find profile name (we might need a method to list profiles or just use ID)
-          // For now, if we have a default ID, we just login with it.
-          // Note: useAppStore.login expects {id, name}
-          login({ id: settings.defaultProfile, name: 'User' });
+          await login({ id: settings.defaultProfile, name: 'User' });
         }
       }
+      sensorService.startGlobalTracking(useAppStore.getState);
     };
     attemptAutoLogin();
 
@@ -80,6 +79,26 @@ const App = () => {
         const habitId = url.replace('rise://habit-toggle/', '');
         const today = new Date().toISOString().split('T')[0];
         toggleHabit(habitId, today);
+      } else if (url.includes('rise://habit-action/')) {
+        const parts = url.replace('rise://habit-action/', '').split('/');
+        const actionType = parts[0];
+        const targetId = parts[1];
+        const extra = parts[2];
+        const today = new Date().toISOString().split('T')[0];
+
+        if (actionType === 'toggle' && targetId) {
+          toggleHabit(targetId, today);
+        } else if (actionType === 'increment' && targetId) {
+          const amount = parseInt(extra) || 100;
+          useAppStore.getState().updateNumericProgress(targetId, today, amount);
+        } else if (actionType === 'silence-toggle' && targetId) {
+          const store = useAppStore.getState();
+          const habit = store.habits.find(h => h.id === targetId);
+          if (habit) {
+            const currentProgress = habit.timerProgress?.[today] || 0;
+            store.updateTimerProgress(targetId, today, 300); // 5 mins
+          }
+        }
       }
     };
 

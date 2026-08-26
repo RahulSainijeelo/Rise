@@ -33,9 +33,6 @@ class SunsetWidget : AppWidgetProvider() {
             views.setTextViewText(R.id.habit_title, "DIGITAL SUNSET")
             views.setImageViewResource(R.id.app_logo, R.drawable.widget_icon_sunset)
             views.setImageViewResource(R.id.habit_empty_icon, R.drawable.widget_icon_sunset)
-            views.setImageViewResource(R.id.habit_anim_frame1, R.drawable.anim_sunset_frame1)
-            views.setImageViewResource(R.id.habit_anim_frame2, R.drawable.anim_sunset_frame2)
-            views.setImageViewResource(R.id.habit_anim_frame3, R.drawable.anim_sunset_frame3)
 
             val sharedPref = context.getSharedPreferences("RiseWidgetPrefs", Context.MODE_PRIVATE)
             val sensorDataStr = sharedPref.getString("sensorData", "{}") ?: "{}"
@@ -56,13 +53,37 @@ class SunsetWidget : AppWidgetProvider() {
                     
                     views.setTextViewText(R.id.habit_goal_text, "GOAL: OFF AT SUNSET")
                     views.setProgressBar(R.id.habit_progress, 1, if (isCompleted) 1 else 0, false)
+
+                    if (isCompleted) {
+                        views.setTextViewText(R.id.habit_status_badge, "COMPLETED ✓")
+                        views.setTextColor(R.id.habit_status_badge, 0xFF4ADE80.toInt())
+                        views.setImageViewResource(R.id.habit_anim_frame1, R.drawable.anim_completed_frame1)
+                        views.setImageViewResource(R.id.habit_anim_frame2, R.drawable.anim_completed_frame2)
+                        views.setImageViewResource(R.id.habit_anim_frame3, R.drawable.anim_completed_frame3)
+                        views.setTextViewText(R.id.habit_action_btn, "✓ NIGHT COMPLETED")
+                    } else {
+                        views.setTextViewText(R.id.habit_status_badge, "IN PROGRESS")
+                        views.setTextColor(R.id.habit_status_badge, 0xFFD71921.toInt())
+                        views.setImageViewResource(R.id.habit_anim_frame1, R.drawable.anim_sunset_frame1)
+                        views.setImageViewResource(R.id.habit_anim_frame2, R.drawable.anim_sunset_frame2)
+                        views.setImageViewResource(R.id.habit_anim_frame3, R.drawable.anim_sunset_frame3)
+                        views.setTextViewText(R.id.habit_action_btn, "🌙 WIND DOWN ✓")
+                    }
                     
-                    val intent = Intent(context, MainActivity::class.java).apply {
+                    val detailIntent = Intent(context, MainActivity::class.java).apply {
                         action = Intent.ACTION_VIEW
                         data = Uri.parse("rise://item/$habitId/habit")
                         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                     }
-                    views.setOnClickPendingIntent(R.id.habit_content, PendingIntent.getActivity(context, 500 + appWidgetId, intent, 
+                    views.setOnClickPendingIntent(R.id.habit_content, PendingIntent.getActivity(context, 500 + appWidgetId, detailIntent, 
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+
+                    val toggleIntent = Intent(context, MainActivity::class.java).apply {
+                        action = Intent.ACTION_VIEW
+                        data = Uri.parse("rise://habit-action/toggle/$habitId")
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    }
+                    views.setOnClickPendingIntent(R.id.habit_action_btn, PendingIntent.getActivity(context, 502 + appWidgetId, toggleIntent, 
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
                 } else {
                     views.setViewVisibility(R.id.habit_content, View.GONE)

@@ -33,9 +33,6 @@ class MovementWidget : AppWidgetProvider() {
             views.setTextViewText(R.id.habit_title, "IMMEDIATE RISE")
             views.setImageViewResource(R.id.app_logo, R.drawable.widget_icon_movement)
             views.setImageViewResource(R.id.habit_empty_icon, R.drawable.widget_icon_movement)
-            views.setImageViewResource(R.id.habit_anim_frame1, R.drawable.anim_movement_frame1)
-            views.setImageViewResource(R.id.habit_anim_frame2, R.drawable.anim_movement_frame2)
-            views.setImageViewResource(R.id.habit_anim_frame3, R.drawable.anim_movement_frame3)
 
             val sharedPref = context.getSharedPreferences("RiseWidgetPrefs", Context.MODE_PRIVATE)
             val sensorDataStr = sharedPref.getString("sensorData", "{}") ?: "{}"
@@ -48,6 +45,7 @@ class MovementWidget : AppWidgetProvider() {
                     val progress = habitData.optDouble("progress", 0.0)
                     val goal = habitData.optDouble("goal", 50.0)
                     val habitId = habitData.optString("id", "")
+                    val isCompleted = habitData.optBoolean("isCompleted", false) || (progress >= goal && goal > 0)
 
                     views.setViewVisibility(R.id.habit_content, View.VISIBLE)
                     views.setViewVisibility(R.id.habit_empty_container, View.GONE)
@@ -57,13 +55,37 @@ class MovementWidget : AppWidgetProvider() {
                     
                     views.setTextViewText(R.id.habit_goal_text, "GOAL: ${goal.toInt()}")
                     views.setProgressBar(R.id.habit_progress, goal.toInt(), progress.toInt(), false)
+
+                    if (isCompleted) {
+                        views.setTextViewText(R.id.habit_status_badge, "COMPLETED ✓")
+                        views.setTextColor(R.id.habit_status_badge, 0xFF4ADE80.toInt())
+                        views.setImageViewResource(R.id.habit_anim_frame1, R.drawable.anim_completed_frame1)
+                        views.setImageViewResource(R.id.habit_anim_frame2, R.drawable.anim_completed_frame2)
+                        views.setImageViewResource(R.id.habit_anim_frame3, R.drawable.anim_completed_frame3)
+                        views.setTextViewText(R.id.habit_action_btn, "✓ RISE COMPLETE")
+                    } else {
+                        views.setTextViewText(R.id.habit_status_badge, "IN PROGRESS")
+                        views.setTextColor(R.id.habit_status_badge, 0xFFD71921.toInt())
+                        views.setImageViewResource(R.id.habit_anim_frame1, R.drawable.anim_movement_frame1)
+                        views.setImageViewResource(R.id.habit_anim_frame2, R.drawable.anim_movement_frame2)
+                        views.setImageViewResource(R.id.habit_anim_frame3, R.drawable.anim_movement_frame3)
+                        views.setTextViewText(R.id.habit_action_btn, "⚡ RISE NOW ✓")
+                    }
                     
-                    val intent = Intent(context, MainActivity::class.java).apply {
+                    val detailIntent = Intent(context, MainActivity::class.java).apply {
                         action = Intent.ACTION_VIEW
                         data = Uri.parse("rise://item/$habitId/habit")
                         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                     }
-                    views.setOnClickPendingIntent(R.id.habit_content, PendingIntent.getActivity(context, 400 + appWidgetId, intent, 
+                    views.setOnClickPendingIntent(R.id.habit_content, PendingIntent.getActivity(context, 400 + appWidgetId, detailIntent, 
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+
+                    val toggleIntent = Intent(context, MainActivity::class.java).apply {
+                        action = Intent.ACTION_VIEW
+                        data = Uri.parse("rise://habit-action/toggle/$habitId")
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    }
+                    views.setOnClickPendingIntent(R.id.habit_action_btn, PendingIntent.getActivity(context, 402 + appWidgetId, toggleIntent, 
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
                 } else {
                     views.setViewVisibility(R.id.habit_content, View.GONE)

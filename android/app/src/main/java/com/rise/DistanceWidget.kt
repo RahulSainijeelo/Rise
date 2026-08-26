@@ -33,9 +33,6 @@ class DistanceWidget : AppWidgetProvider() {
             views.setTextViewText(R.id.habit_title, "CITY GLIDER")
             views.setImageViewResource(R.id.app_logo, R.drawable.widget_icon_distance)
             views.setImageViewResource(R.id.habit_empty_icon, R.drawable.widget_icon_distance)
-            views.setImageViewResource(R.id.habit_anim_frame1, R.drawable.anim_glider_frame1)
-            views.setImageViewResource(R.id.habit_anim_frame2, R.drawable.anim_glider_frame2)
-            views.setImageViewResource(R.id.habit_anim_frame3, R.drawable.anim_glider_frame3)
 
             val sharedPref = context.getSharedPreferences("RiseWidgetPrefs", Context.MODE_PRIVATE)
             val sensorDataStr = sharedPref.getString("sensorData", "{}") ?: "{}"
@@ -48,6 +45,7 @@ class DistanceWidget : AppWidgetProvider() {
                     val progressKm = habitData.optDouble("progress", 0.0)
                     val goalKm = habitData.optDouble("goal", 2.0)
                     val habitId = habitData.optString("id", "")
+                    val isCompleted = habitData.optBoolean("isCompleted", false) || (progressKm >= goalKm && goalKm > 0)
 
                     views.setViewVisibility(R.id.habit_content, View.VISIBLE)
                     views.setViewVisibility(R.id.habit_empty_container, View.GONE)
@@ -62,6 +60,22 @@ class DistanceWidget : AppWidgetProvider() {
                     
                     views.setTextViewText(R.id.habit_goal_text, "GOAL: ${goalKm.toInt()}KM")
                     views.setProgressBar(R.id.habit_progress, (goalKm * 100).toInt(), (progressKm * 100).toInt(), false)
+
+                    if (isCompleted) {
+                        views.setTextViewText(R.id.habit_status_badge, "COMPLETED ✓")
+                        views.setTextColor(R.id.habit_status_badge, 0xFF4ADE80.toInt())
+                        views.setImageViewResource(R.id.habit_anim_frame1, R.drawable.anim_completed_frame1)
+                        views.setImageViewResource(R.id.habit_anim_frame2, R.drawable.anim_completed_frame2)
+                        views.setImageViewResource(R.id.habit_anim_frame3, R.drawable.anim_completed_frame3)
+                        views.setTextViewText(R.id.habit_action_btn, "✓ GLIDE COMPLETED")
+                    } else {
+                        views.setTextViewText(R.id.habit_status_badge, "IN PROGRESS")
+                        views.setTextColor(R.id.habit_status_badge, 0xFFD71921.toInt())
+                        views.setImageViewResource(R.id.habit_anim_frame1, R.drawable.anim_glider_frame1)
+                        views.setImageViewResource(R.id.habit_anim_frame2, R.drawable.anim_glider_frame2)
+                        views.setImageViewResource(R.id.habit_anim_frame3, R.drawable.anim_glider_frame3)
+                        views.setTextViewText(R.id.habit_action_btn, "📍 TRACK / SYNC")
+                    }
                     
                     val intent = Intent(context, MainActivity::class.java).apply {
                         action = Intent.ACTION_VIEW
@@ -69,6 +83,8 @@ class DistanceWidget : AppWidgetProvider() {
                         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                     }
                     views.setOnClickPendingIntent(R.id.habit_content, PendingIntent.getActivity(context, 200 + appWidgetId, intent, 
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+                    views.setOnClickPendingIntent(R.id.habit_action_btn, PendingIntent.getActivity(context, 202 + appWidgetId, intent, 
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
                 } else {
                     views.setViewVisibility(R.id.habit_content, View.GONE)

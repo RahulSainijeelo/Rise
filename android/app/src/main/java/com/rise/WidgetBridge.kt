@@ -149,21 +149,69 @@ class WidgetBridge(reactContext: ReactApplicationContext) : ReactContextBaseJava
     }
 
     private fun notifyWidgetUpdate() {
-        val context = reactApplicationContext
-        val appWidgetManager = AppWidgetManager.getInstance(context)
-        
-        // Notify main list widget
-        val mainIds = appWidgetManager.getAppWidgetIds(ComponentName(context, RiseWidget::class.java))
-        if (mainIds.isNotEmpty()) {
-            appWidgetManager.notifyAppWidgetViewDataChanged(mainIds, R.id.widget_list)
-        }
+        try {
+            val context = reactApplicationContext
+            val appWidgetManager = AppWidgetManager.getInstance(context)
+            
+            // 1. Rise main tasks widget
+            val mainIds = appWidgetManager.getAppWidgetIds(ComponentName(context, RiseWidget::class.java))
+            for (id in mainIds) {
+                RiseWidget.updateAppWidget(context, appWidgetManager, id)
+            }
+            if (mainIds.isNotEmpty()) {
+                appWidgetManager.notifyAppWidgetViewDataChanged(mainIds, R.id.widget_list)
+            }
 
-        // Send broad broadcast to all widget providers
-        val updateIntent = Intent("com.rise.WIDGET_UPDATE").apply {
-            setPackage(context.packageName)
+            // 2. HabitControlWidget
+            val habitIds = appWidgetManager.getAppWidgetIds(ComponentName(context, HabitControlWidget::class.java))
+            for (id in habitIds) {
+                HabitControlWidget.updateWidget(context, appWidgetManager, id)
+            }
+            if (habitIds.isNotEmpty()) {
+                appWidgetManager.notifyAppWidgetViewDataChanged(habitIds, R.id.habit_calendar_grid)
+            }
+
+            // 3. TaskTimerWidget
+            val timerIds = appWidgetManager.getAppWidgetIds(ComponentName(context, TaskTimerWidget::class.java))
+            for (id in timerIds) {
+                TaskTimerWidget.updateWidget(context, appWidgetManager, id)
+            }
+
+            // 4. Sensor Widgets
+            val stepIds = appWidgetManager.getAppWidgetIds(ComponentName(context, StepWidget::class.java))
+            for (id in stepIds) {
+                StepWidget.updateWidget(context, appWidgetManager, id)
+            }
+
+            val distIds = appWidgetManager.getAppWidgetIds(ComponentName(context, DistanceWidget::class.java))
+            for (id in distIds) {
+                DistanceWidget.updateWidget(context, appWidgetManager, id)
+            }
+
+            val silenceIds = appWidgetManager.getAppWidgetIds(ComponentName(context, SilenceWidget::class.java))
+            for (id in silenceIds) {
+                SilenceWidget.updateWidget(context, appWidgetManager, id)
+            }
+
+            val moveIds = appWidgetManager.getAppWidgetIds(ComponentName(context, MovementWidget::class.java))
+            for (id in moveIds) {
+                MovementWidget.updateWidget(context, appWidgetManager, id)
+            }
+
+            val sunsetIds = appWidgetManager.getAppWidgetIds(ComponentName(context, SunsetWidget::class.java))
+            for (id in sunsetIds) {
+                SunsetWidget.updateWidget(context, appWidgetManager, id)
+            }
+
+            // Broad broadcast as backup
+            val updateIntent = Intent("com.rise.WIDGET_UPDATE").apply {
+                setPackage(context.packageName)
+            }
+            context.sendBroadcast(updateIntent)
+            
+            Log.d("WidgetBridge", "Directly updated all widget instances successfully")
+        } catch (e: Exception) {
+            Log.e("WidgetBridge", "Error in notifyWidgetUpdate", e)
         }
-        context.sendBroadcast(updateIntent)
-        
-        Log.d("WidgetBridge", "Sent WIDGET_UPDATE broadcast")
     }
 }

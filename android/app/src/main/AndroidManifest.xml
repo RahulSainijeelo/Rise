@@ -61,7 +61,10 @@
         android:exported="true"
         android:label="@string/widget_step_label"
         android:icon="@drawable/widget_icon_steps">
-        <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+        <intent-filter>
+            <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            <action android:name="com.rise.WIDGET_UPDATE" />
+        </intent-filter>
         <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_step_info" />
       </receiver>
 
@@ -70,7 +73,10 @@
         android:exported="true"
         android:label="@string/widget_distance_label"
         android:icon="@drawable/widget_icon_distance">
-        <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+        <intent-filter>
+            <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            <action android:name="com.rise.WIDGET_UPDATE" />
+        </intent-filter>
         <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_distance_info" />
       </receiver>
 
@@ -79,7 +85,10 @@
         android:exported="true"
         android:label="@string/widget_silence_label"
         android:icon="@drawable/widget_icon_silence">
-        <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+        <intent-filter>
+            <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            <action android:name="com.rise.WIDGET_UPDATE" />
+        </intent-filter>
         <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_silence_info" />
       </receiver>
 
@@ -88,7 +97,10 @@
         android:exported="true"
         android:label="@string/widget_movement_label"
         android:icon="@drawable/widget_icon_movement">
-        <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+        <intent-filter>
+            <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            <action android:name="com.rise.WIDGET_UPDATE" />
+        </intent-filter>
         <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_movement_info" />
       </receiver>
 
@@ -97,7 +109,10 @@
         android:exported="true"
         android:label="@string/widget_sunset_label"
         android:icon="@drawable/widget_icon_sunset">
-        <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+        <intent-filter>
+            <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            <action android:name="com.rise.WIDGET_UPDATE" />
+        </intent-filter>
         <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_sunset_info" />
       </receiver>
 
@@ -108,6 +123,7 @@
         android:icon="@drawable/widget_icon_timer">
         <intent-filter>
             <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            <action android:name="com.rise.WIDGET_UPDATE" />
             <action android:name="com.rise.TIMER_ACTION" />
         </intent-filter>
         <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_timer_info" />

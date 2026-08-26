@@ -1,0 +1,10 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp"
+    android:height="40dp"
+    android:viewportWidth="64"
+    android:viewportHeight="40">
+    <!-- Starburst Frame 1 -->
+    <path android:fillColor="#D71921" android:pathData="M32,6l3,8l9,1l-6,6l2,9l-8,-4l-8,4l2,-9l-6,-6l9,-1z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M30,18h4v4h-4z" />
+    <path android:fillColor="#555555" android:pathData="M16,10h2v2h-2z M46,10h2v2h-2z M18,30h2v2h-2z M44,30h2v2h-2z" />
+</vector>

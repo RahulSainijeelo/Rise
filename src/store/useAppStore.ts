@@ -139,6 +139,22 @@ const scheduleSave = (get: () => AppState) => {
     if (saveDebounceTimer) {
         clearTimeout(saveDebounceTimer);
     }
+    // Update native widgets immediately on every state change
+    try {
+        const state = get();
+        if (state.activeProfile) {
+            const allTasks = getTasksArray({
+                byId: state.tasksById,
+                allIds: state.taskIds,
+                byCategory: state.tasksByCategory,
+                byDate: state.tasksByDate,
+                byStatus: state.tasksByStatus
+            });
+            WidgetService.updateWidget(allTasks, state.habits, state.labels, state.activeTimer);
+        }
+    } catch (e) {
+        console.warn('Failed immediate widget update in scheduleSave', e);
+    }
     saveDebounceTimer = setTimeout(() => {
         get().saveData();
     }, 400);

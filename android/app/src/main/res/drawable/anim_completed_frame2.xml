@@ -1,0 +1,15 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp"
+    android:height="40dp"
+    android:viewportWidth="64"
+    android:viewportHeight="40">
+    <!-- Checkmark Burst Frame 2 -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3"
+        android:pathData="M22,20L29,27L43,13" />
+    <path android:fillColor="#D71921" android:pathData="M32,3m-3,0a3,3 0 1,0 6,0a3,3 0 1,0 -6,0" />
+    <path android:fillColor="#D71921" android:pathData="M12,20m-2,0a2,2 0 1,0 4,0a2,2 0 1,0 -4,0" />
+    <path android:fillColor="#D71921" android:pathData="M52,20m-2,0a2,2 0 1,0 4,0a2,2 0 1,0 -4,0" />
+    <path android:fillColor="#D71921" android:pathData="M32,36m-2,0a2,2 0 1,0 4,0a2,2 0 1,0 -4,0" />
+</vector>

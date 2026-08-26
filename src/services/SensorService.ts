@@ -194,15 +194,51 @@ class SensorService {
         }
     }
 
-    // Light Sensor (Simulated)
-    startLightSensor(onData: (lux: number) => void) {
-        return setInterval(() => {
-            onData(Math.floor(Math.random() * 500));
-        }, 1000);
+    // Global Live Tracker for App & Widgets
+    startGlobalTracking(getStore: () => any) {
+        const today = new Date().toISOString().split('T')[0];
+        const state = getStore();
+        const habits = state.habits || [];
+
+        const hasStepHabit = habits.some((h: any) => h.sensorType === 'pedometer' || h.sensorType === 'movement');
+        const hasGpsHabit = habits.some((h: any) => h.sensorType === 'gps');
+
+        if (hasStepHabit) {
+            const initialSteps = habits.find((h: any) => h.sensorType === 'pedometer')?.numericProgress?.[today] || 0;
+            this.startPedometer(initialSteps, (steps) => {
+                const curState = getStore();
+                curState.habits.forEach((h: any) => {
+                    if ((h.sensorType === 'pedometer' || h.sensorType === 'movement') && !h.completedDates?.includes(today)) {
+                        const cur = h.numericProgress?.[today] || 0;
+                        if (steps > cur) {
+                            curState.updateSensorProgress(h.id, today, steps);
+                        }
+                    }
+                });
+            });
+        }
+
+        if (hasGpsHabit) {
+            const initialKm = habits.find((h: any) => h.sensorType === 'gps')?.numericProgress?.[today] || 0;
+            this.startLocationTracking(initialKm * 1000, (lat, lng, distMeters) => {
+                const curState = getStore();
+                const km = distMeters / 1000;
+                curState.habits.forEach((h: any) => {
+                    if (h.sensorType === 'gps' && !h.completedDates?.includes(today)) {
+                        const cur = h.numericProgress?.[today] || 0;
+                        if (km > cur) {
+                            curState.updateSensorProgress(h.id, today, km);
+                        }
+                    }
+                });
+            });
+        }
     }
 
-    stopLightSensor(interval: any) {
-        if (interval) clearInterval(interval);
+    stopGlobalTracking() {
+        this.stopPedometer();
+        this.stopLocationTracking();
+        this.stopNoiseSensor();
     }
 }
 

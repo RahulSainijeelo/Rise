@@ -16,7 +16,7 @@
 <br/>
 
 <a href="https://github.com/RahulSainijeelo/Rise/releases/download/v2.0.0/app-release.apk">
-  <img src="https://img.shields.io/badge/DOWNLOAD_LATEST_RELEASE-APK-D71921?style=for-the-badge&logo=android&logoColor=white" height="42" alt="Download APK" />
+  <img src="https://img.shields.io/badge/DOWNLOAD_LATEST_RELEASE-APK-D71921?style=for-the-badge&logo=android&logoColor=green" height="42" alt="Download APK" />
 </a>
 
 </div>

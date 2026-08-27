@@ -1,8 +1,46 @@
 import { NativeModules, Platform } from 'react-native';
 import dayjs from 'dayjs';
+import {
+    SENSOR_SLOTS,
+    SENSOR_PAYLOAD_VERSION,
+    TEMPLATE_SLOT,
+    SUNSET_DEFAULTS,
+} from './WidgetContract';
+import {
+    habitProgress,
+    habitGoal,
+    habitStep,
+    habitDisplayMode,
+    habitControls,
+    isInverseGoal,
+} from '../utils/HabitMetrics';
+import { buildSensorConfig } from './SensorService';
 
 // Accessing NativeModules safely
 const WidgetBridge = NativeModules.WidgetBridge;
+
+/**
+ * Secondary status line for a sensor widget.
+ *
+ * Inverse-goal habits need this: "3 / 5 MIN" on its own does not tell you
+ * whether you are winning, because for Digital Sunset a smaller number is
+ * better and the day is not decided until the window closes.
+ */
+const sensorNote = (habit: any, date: string): string => {
+    if (habit.sensorType === 'screen') {
+        const cutoff = habit.cutoffTime || SUNSET_DEFAULTS.cutoffTime;
+        const end = habit.windowEndTime || SUNSET_DEFAULTS.windowEndTime;
+        const used = habitProgress(habit, date);
+        const limit = habitGoal(habit);
+        if (used > limit) return `LIMIT BROKEN AFTER ${cutoff}`;
+        return `${cutoff}-${end} · ${Math.max(0, Math.round(limit - used))} MIN LEFT`;
+    }
+    if (isInverseGoal(habit)) {
+        return habitProgress(habit, date) > habitGoal(habit) ? 'LIMIT BROKEN' : 'HOLDING';
+    }
+    if (habit.streak > 0) return `${habit.streak} DAY STREAK`;
+    return '';
+};
 
 export interface WidgetItem {
     id: string;
@@ -112,60 +150,64 @@ export const WidgetService = {
                 WidgetBridge.setHabitHistoryData(JSON.stringify(habitHistory));
             }
 
-            // Dedicated payload for the 5 sensor widgets
-            const sensorData: any = {};
-            const sensorTypes = ['pedometer', 'gps', 'noise', 'movement', 'screen'];
+            // ---------------------------------------------------------------
+            // Dedicated payload for the five sensor widgets.
+            //
+            // Binding is deterministic: templateId first, then an exact
+            // sensorType match. The previous version guessed from the title
+            // (`includes('sunset') || includes('phone') || includes('night')`),
+            // so renaming a habit orphaned its widget and two similarly named
+            // habits fought over one slot. It then discarded the user's goal and
+            // unit in favour of hardcoded ones. See docs/WIDGET_CONTRACT.md.
+            // ---------------------------------------------------------------
+            const sensorData: any = {
+                _meta: {
+                    version: SENSOR_PAYLOAD_VERSION,
+                    syncedAt: Date.now(),
+                    loggedIn: true,
+                },
+            };
 
-            sensorTypes.forEach(type => {
-                const habit = (habits || []).find((h: any) => {
-                    if (h.sensorType === type) return true;
-                    const lowerTitle = (h.title || '').toLowerCase();
-                    if (type === 'pedometer' && (lowerTitle.includes('step') || lowerTitle.includes('walk') || h.sensorType === 'pedometer')) return true;
-                    if (type === 'gps' && (lowerTitle.includes('glider') || lowerTitle.includes('city') || lowerTitle.includes('distance') || lowerTitle.includes('bike') || h.sensorType === 'gps')) return true;
-                    if (type === 'noise' && (lowerTitle.includes('silence') || lowerTitle.includes('quiet') || lowerTitle.includes('meditation') || h.sensorType === 'noise')) return true;
-                    if (type === 'movement' && (lowerTitle.includes('rise') || lowerTitle.includes('immediate') || lowerTitle.includes('snooze') || h.sensorType === 'movement')) return true;
-                    if (type === 'screen' && (lowerTitle.includes('sunset') || lowerTitle.includes('phone') || lowerTitle.includes('night') || h.sensorType === 'screen')) return true;
-                    return false;
-                });
+            SENSOR_SLOTS.forEach((slot) => {
+                const byTemplate = (habits || []).find(
+                    (h: any) => h.templateId && TEMPLATE_SLOT[h.templateId] === slot
+                );
+                const habit = byTemplate || (habits || []).find((h: any) => h.sensorType === slot);
 
-                if (habit) {
-                    let progress = habit.numericProgress?.[today] || 0;
-                    let goal = habit.numericGoal || (habit.type === 'timer' ? (habit.timerGoal || 3600) : 1);
-                    let unit = habit.numericUnit || '';
-
-                    if (type === 'gps') {
-                        if (!unit) unit = 'KM';
-                        if (!habit.numericGoal) goal = 2.0;
-                    } else if (type === 'movement') {
-                        goal = habit.numericGoal || 50;
-                        unit = 'STEPS';
-                    } else if (type === 'noise') {
-                        goal = habit.timerGoal || 3600;
-                        unit = 'MINUTES';
-                        progress = habit.timerProgress?.[today] || progress;
-                    } else if (type === 'pedometer') {
-                        goal = habit.numericGoal || 10000;
-                        unit = 'STEPS';
-                    }
-
-                    sensorData[type] = {
-                        id: habit.id,
-                        title: habit.title,
-                        progress,
-                        goal,
-                        unit,
-                        exists: true,
-                        isCompleted: habit.completedDates?.includes(today) || false
-                    };
-                } else {
-                    sensorData[type] = { exists: false };
+                if (!habit) {
+                    sensorData[slot] = { exists: false };
+                    return;
                 }
+
+                sensorData[slot] = {
+                    exists: true,
+                    id: habit.id,
+                    templateId: habit.templateId,
+                    // The habit's own title and unit, never a hardcoded string.
+                    title: habit.title,
+                    habitType: habit.type || 'check',
+                    progress: habitProgress(habit, today),
+                    goal: habitGoal(habit),
+                    unit: (habit.numericUnit || '').toUpperCase(),
+                    step: habitStep(habit),
+                    displayMode: habitDisplayMode(habit),
+                    goalDirection: habit.goalDirection || 'atLeast',
+                    isCompleted: habit.completedDates?.includes(today) || false,
+                    streak: habit.streak || 0,
+                    controls: habitControls(habit),
+                    live: false, // the native service flips this on when it is feeding
+                    note: sensorNote(habit, today),
+                };
             });
 
             if (typeof WidgetBridge.setSensorData === 'function') {
                 WidgetBridge.setSensorData(JSON.stringify(sensorData));
-            } else {
-                WidgetBridge.setWidgetData(JSON.stringify({ ...limitedItems, sensorData }));
+            }
+
+            // Hand the native service the window and threshold config it needs to
+            // keep counting while the app is closed.
+            if (typeof WidgetBridge.setSensorConfig === 'function') {
+                WidgetBridge.setSensorConfig(JSON.stringify(buildSensorConfig(habits || [])));
             }
         } catch (e) {
             console.error('WidgetService: Failed to update widget data', e);
@@ -180,6 +222,19 @@ export const WidgetService = {
         try {
             // Send a special marker to indicate not logged in
             WidgetBridge.setWidgetData(JSON.stringify([{ id: '__not_logged_in__', title: 'LOGIN', status: 'pending', type: 'task' }]));
+
+            // The sensor widgets have their own payload, so clearing widgetData
+            // alone left them showing the previous user's step count.
+            if (typeof WidgetBridge.setSensorData === 'function') {
+                const cleared: any = {
+                    _meta: { version: SENSOR_PAYLOAD_VERSION, syncedAt: Date.now(), loggedIn: false },
+                };
+                SENSOR_SLOTS.forEach(slot => { cleared[slot] = { exists: false }; });
+                WidgetBridge.setSensorData(JSON.stringify(cleared));
+            }
+            if (typeof WidgetBridge.setSensorConfig === 'function') {
+                WidgetBridge.setSensorConfig(JSON.stringify({}));
+            }
         } catch (e) {
             console.error('WidgetService: Failed to clear widget data', e);
         }

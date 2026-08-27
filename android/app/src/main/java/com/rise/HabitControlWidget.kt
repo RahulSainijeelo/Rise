@@ -28,17 +28,13 @@ class HabitControlWidget : AppWidgetProvider() {
                 val ids = appWidgetManager.getAppWidgetIds(ComponentName(context, HabitControlWidget::class.java))
                 onUpdate(context, appWidgetManager, ids)
             }
-            "com.rise.TOGGLE_HABIT_WIDGET" -> {
-                val id = intent.getStringExtra("itemId") ?: return
-                
-                // Open app to handle toggle
-                val mainIntent = Intent(context, MainActivity::class.java).apply {
-                    this.action = "com.rise.TOGGLE_HABIT"
-                    putExtra("itemId", id)
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                }
-                context.startActivity(mainIntent)
-            }
+            // There was a "com.rise.TOGGLE_HABIT_WIDGET" branch here that launched
+            // MainActivity with a com.rise.TOGGLE_HABIT action. Nothing built that
+            // intent -- the toggle button below uses a rise://habit-toggle deep link,
+            // which App.tsx does handle -- and nothing consumed that action either.
+            // Since the receiver must stay exported for APPWIDGET_UPDATE, the branch
+            // was reachable only by another app, and its one effect was to pop Rise
+            // to the foreground. Removed along with its manifest filter.
         }
     }
 

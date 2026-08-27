@@ -25,4 +25,12 @@
 
     <string name="widget_sunset_label">Rise: Digital Sunset</string>
     <string name="widget_sunset_desc">Evening screen-off and wind-down tracker.</string>
+
+    <!-- Content descriptions for the shared sensor widget layout -->
+    <string name="widget_sensor_icon_desc">Habit icon</string>
+    <string name="widget_sensor_anim_desc">Habit activity animation</string>
+
+    <!-- Sensor tracking foreground service -->
+    <string name="sensor_service_channel_name">Habit tracking</string>
+    <string name="sensor_service_channel_desc">Keeps step, distance, silence and screen-time habits counting while Rise is closed.</string>
 </resources>

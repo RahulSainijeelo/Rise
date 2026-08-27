@@ -12,7 +12,7 @@ import { Plus, Check, Flame, X, Timer, Heart, Sparkles, Minus, TrendingUp, Compa
 import dayjs from 'dayjs';
 import { useNavigation } from '@react-navigation/native';
 import { HabitsScreenStyles as styles } from '../styles/Habit.styles';
-import { COMMON_HABITS_TEMPLATES, HabitTemplate } from '../utils/HabitTemplates';
+import { COMMON_HABITS_TEMPLATES, HabitTemplate, habitFromTemplate } from '../utils/HabitTemplates';
 
 export const HabitsScreen = () => {
     const route = useRoute<any>();
@@ -58,7 +58,14 @@ export const HabitsScreen = () => {
 
     const handleAddHabit = () => {
         if (newTitle.trim()) {
+            // Start from the template so sensor wiring, templateId and any
+            // inverse-goal config come along, then let the form's own fields win.
+            const base = selectedTemplate
+                ? habitFromTemplate(selectedTemplate, undefined, theme.colors.primary)
+                : {};
+
             addHabit({
+                ...base,
                 title: newTitle,
                 description: newDesc,
                 frequency: newFreq,
@@ -73,7 +80,7 @@ export const HabitsScreen = () => {
                 response: selectedTemplate?.response,
                 reward: selectedTemplate?.reward,
                 howToApply: selectedTemplate?.howToApply,
-            });
+            } as any);
             setNewTitle('');
             setNewDesc('');
             setNewType('check');

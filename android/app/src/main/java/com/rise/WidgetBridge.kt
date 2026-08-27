@@ -102,6 +102,27 @@ class WidgetBridge(reactContext: ReactApplicationContext) : ReactContextBaseJava
         }
     }
 
+    /**
+     * Config the foreground service needs: the Digital Sunset window, the noise
+     * threshold, and which habit id owns each slot.
+     *
+     * Deliberately does not notify the widgets — this blob is invisible to them,
+     * and JS pushes it on every store write, so redrawing here would double the
+     * widget update rate for no visible change.
+     */
+    @ReactMethod
+    fun setSensorConfig(data: String) {
+        try {
+            val sharedPref = reactApplicationContext.getSharedPreferences("RiseWidgetPrefs", Context.MODE_PRIVATE)
+            with(sharedPref.edit()) {
+                putString(WidgetContract.KEY_SENSOR_CONFIG, data)
+                apply()
+            }
+        } catch (e: Exception) {
+            Log.e("WidgetBridge", "Error updating sensor config", e)
+        }
+    }
+
     @ReactMethod
     fun setTimerData(data: String) {
         try {

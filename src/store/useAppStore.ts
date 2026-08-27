@@ -14,6 +14,9 @@ import {
     deleteTaskFromNormalized,
     getTasksArray
 } from '../utils/NormalizedTaskStore';
+// Type-only import: erased at compile time, so this cannot create a runtime cycle
+// even though HabitTemplates imports the Habit type back from here.
+import type { SensorType, GoalDirection, SunsetVerification } from '../utils/HabitTemplates';
 
 export interface Task {
     id: string;
@@ -56,8 +59,105 @@ export interface Habit {
     howToApply?: string;
     // Sensor Information
     isSensorBased?: boolean;
-    sensorType?: 'pedometer' | 'light' | 'screen' | 'noise' | 'movement' | 'gps';
+    sensorType?: SensorType;
+    /**
+     * The HabitTemplate this habit was created from, e.g. 'digital_sunset'.
+     * This is how widgets bind to habits. Before it existed, WidgetService
+     * guessed from the title, so renaming a habit orphaned its widget.
+     */
+    templateId?: string;
+    requiredPermissions?: string[];
+    /**
+     * 'atMost' habits are won by staying *under* the goal, so completion must
+     * never be inferred from progress crossing it. Defaults to 'atLeast'.
+     */
+    goalDirection?: GoalDirection;
+    /** Ambient dB at or below which a 'noise' habit's timer accrues. */
+    noiseThresholdDb?: number;
+    /** 'screen' habits: nightly window and grace allowance. */
+    cutoffTime?: string;
+    windowEndTime?: string;
+    allowanceMinutes?: number;
+    sunsetVerification?: SunsetVerification;
 }
+
+/**
+ * Whether `progress` should mark `date` complete, given the habit's goal
+ * direction. Returns null when completion is not derivable from progress at all
+ * and must be left exactly as the user set it.
+ *
+ * Every progress reducer must go through this. Comparing `progress >= goal`
+ * inline is what made Digital Sunset complete itself the moment you blew past
+ * your own screen-time limit.
+ */
+const derivesCompletion = (habit: Habit, progress: number, goal: number): boolean | null => {
+    if ((habit.goalDirection || 'atLeast') === 'atMost') return null;
+    return progress >= (goal || 1);
+};
+
+/** Apply a derived completion to a date list without disturbing other dates. */
+const applyCompletion = (completedDates: string[], date: string, reached: boolean | null): string[] => {
+    if (reached === null) return completedDates;
+    const isCompleted = completedDates.includes(date);
+    if (reached && !isCompleted) return [...completedDates, date];
+    if (!reached && isCompleted) return completedDates.filter(d => d !== date);
+    return completedDates;
+};
+
+/**
+ * One-time backfill for habits saved before `templateId` existed.
+ *
+ * Title matching is only acceptable here, at load, as a migration. It must never
+ * be used for runtime widget binding — that was the original bug.
+ *
+ * Also repairs the sensor habits whose templates had no usable goal: Digital
+ * Sunset was a bare 'check' with no goal, target time or allowance, and
+ * Immediate Rise was a 'check' that one detected step could complete.
+ */
+const migrateHabits = (habits: Habit[]): Habit[] => {
+    // Required lazily to keep the module graph acyclic at runtime.
+    const { COMMON_HABITS_TEMPLATES } = require('../utils/HabitTemplates');
+    const templates: any[] = COMMON_HABITS_TEMPLATES;
+
+    return habits.map((h) => {
+        if (h.templateId) return h;
+
+        const match = templates.find((t) =>
+            t.title.toLowerCase() === (h.title || '').toLowerCase()
+        );
+        if (!match) return h;
+
+        const next: Habit = { ...h, templateId: match.id };
+
+        // Adopt the template's sensor wiring if the habit predates it.
+        if (next.isSensorBased === undefined) next.isSensorBased = match.isSensorBased;
+        if (!next.sensorType) next.sensorType = match.sensorType;
+        if (!next.requiredPermissions) next.requiredPermissions = match.requiredPermissions;
+        if (next.noiseThresholdDb === undefined) next.noiseThresholdDb = match.noiseThresholdDb;
+
+        // Inverse-goal and window config, absent from every previously saved habit.
+        if (!next.goalDirection) next.goalDirection = match.goalDirection || 'atLeast';
+        if (!next.cutoffTime) next.cutoffTime = match.cutoffTime;
+        if (!next.windowEndTime) next.windowEndTime = match.windowEndTime;
+        if (next.allowanceMinutes === undefined) next.allowanceMinutes = match.allowanceMinutes;
+        if (!next.sunsetVerification) next.sunsetVerification = match.sunsetVerification;
+
+        // A habit stored as 'check' whose template is now measured needs its type
+        // and goal upgraded, or it stays uncompletable (Digital Sunset) or
+        // trivially completable (Immediate Rise).
+        if (h.type === 'check' && match.type !== 'check' && match.goal) {
+            next.type = match.type;
+            if (match.type === 'numeric') {
+                next.numericGoal = next.numericGoal || match.goal;
+                next.numericUnit = next.numericUnit || match.unit;
+            } else if (match.type === 'timer') {
+                next.timerGoal = next.timerGoal || match.goal;
+            }
+        }
+
+        return next;
+    });
+};
 
 export interface Label {
     id: string;
@@ -234,7 +334,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (data) {
             const loadedTasks: Task[] = data.tasks || [];
             const normalized = buildNormalizedTasks(loadedTasks);
-            const habits = data.habits || [];
+            const habits = migrateHabits(data.habits || []);
             set({
                 activeProfile: { id: id, name: data.name || get().activeProfile?.name || id },
                 currentUser: data.name || get().currentUser,
@@ -517,15 +617,11 @@ export const useAppStore = create<AppState>((set, get) => ({
                     const newProgress = Math.max(0, currentProgress + amount);
                     const numericProgress = { ...h.numericProgress, [date]: newProgress };
 
-                    const isCompleted = h.completedDates.includes(date);
-                    const goalReached = newProgress >= (h.numericGoal || 1);
-                    let newCompletedDates = [...h.completedDates];
-
-                    if (goalReached && !isCompleted) {
-                        newCompletedDates.push(date);
-                    } else if (!goalReached && isCompleted) {
-                        newCompletedDates = newCompletedDates.filter(d => d !== date);
-                    }
+                    const newCompletedDates = applyCompletion(
+                        h.completedDates,
+                        date,
+                        derivesCompletion(h, newProgress, h.numericGoal || 1)
+                    );
 
                     return { ...h, numericProgress, completedDates: newCompletedDates };
                 }
@@ -571,15 +667,11 @@ export const useAppStore = create<AppState>((set, get) => ({
                     const newProgress = currentProgress + seconds;
                     const timerProgress = { ...h.timerProgress, [date]: newProgress };
 
-                    const isCompleted = h.completedDates.includes(date);
-                    const goalReached = newProgress >= (h.timerGoal || 1);
-                    let newCompletedDates = [...h.completedDates];
-
-                    if (goalReached && !isCompleted) {
-                        newCompletedDates.push(date);
-                    } else if (!goalReached && isCompleted) {
-                        newCompletedDates = newCompletedDates.filter(d => d !== date);
-                    }
+                    const newCompletedDates = applyCompletion(
+                        h.completedDates,
+                        date,
+                        derivesCompletion(h, newProgress, h.timerGoal || 1)
+                    );
 
                     return { ...h, timerProgress, completedDates: newCompletedDates };
                 }
@@ -628,20 +720,31 @@ export const useAppStore = create<AppState>((set, get) => ({
         set((state) => ({
             habits: state.habits.map(h => {
                 if (h.id === id) {
-                    const numericProgress = { ...h.numericProgress };
-                    numericProgress[date] = value;
+                    // Sensors report an absolute running total, not a delta.
+                    // Route it to the field that matches the habit's own type:
+                    // timer habits (Deep Silence) keep seconds in timerProgress.
+                    // Writing everything to numericProgress is what made the
+                    // silence widget read 0 forever while the sensor was working.
+                    const isTimer = h.type === 'timer';
+                    const goal = isTimer ? (h.timerGoal || 1) : (h.numericGoal || 1);
+                    const newCompletedDates = applyCompletion(
+                        h.completedDates,
+                        date,
+                        derivesCompletion(h, value, goal)
+                    );
 
-                    let newCompletedDates = [...h.completedDates];
-                    const goalReached = value >= (h.numericGoal || 1);
-                    const isCompleted = newCompletedDates.includes(date);
-
-                    if (goalReached && !isCompleted) {
-                        newCompletedDates.push(date);
-                    } else if (!goalReached && isCompleted) {
-                        newCompletedDates = newCompletedDates.filter(d => d !== date);
+                    if (isTimer) {
+                        return {
+                            ...h,
+                            timerProgress: { ...h.timerProgress, [date]: value },
+                            completedDates: newCompletedDates
+                        };
                     }
-
-                    return { ...h, numericProgress, completedDates: newCompletedDates };
+                    return {
+                        ...h,
+                        numericProgress: { ...h.numericProgress, [date]: value },
+                        completedDates: newCompletedDates
+                    };
                 }
                 return h;
             })

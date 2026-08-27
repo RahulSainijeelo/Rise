@@ -11,6 +11,7 @@ import { useAppStore } from '../store/useAppStore';
 import { HabitKnowledgeScreenStyles as styles } from '../styles/Habit.styles';
 import { request, PERMISSIONS, RESULTS, Permission, check } from 'react-native-permissions';
 import { NothingPermissionModal } from '../components/NothingPermissionModal';
+import { habitFromTemplate } from '../utils/HabitTemplates';
 
 export const HabitKnowledgeScreen = ({ route, navigation }: any) => {
     const { template } = route.params;
@@ -89,24 +90,7 @@ export const HabitKnowledgeScreen = ({ route, navigation }: any) => {
         console.log("Proceeding to add habit...");
         const finalGoal = parseInt(goalValue) || template.goal;
 
-        addHabit({
-            title: template.title,
-            description: template.description,
-            frequency: 'daily',
-            type: template.type,
-            timerGoal: template.type === 'timer' ? finalGoal : undefined,
-            numericGoal: template.type === 'numeric' ? finalGoal : undefined,
-            numericUnit: template.unit,
-            reminders: [],
-            color: template.color || theme.colors.primary,
-            cue: template.cue,
-            craving: template.craving,
-            response: template.response,
-            reward: template.reward,
-            howToApply: template.howToApply,
-            isSensorBased: template.isSensorBased,
-            sensorType: template.sensorType,
-        } as any);
+        addHabit(habitFromTemplate(template, finalGoal, theme.colors.primary) as any);
 
         console.log("Habit added, navigating back...");
         navigation.navigate('Main', { screen: 'Habits' });

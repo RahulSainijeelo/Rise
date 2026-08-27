@@ -1,54 +1,65 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Shared layout for all five sensor widgets (steps, distance, silence, movement,
+  digital sunset). Rendered exclusively by SensorWidgetRenderer.
+
+  Every piece of text here is a placeholder. The renderer sets all of it from the
+  habit's own data, because the previous version hardcoded "STEP LEGEND",
+  "STEPS" and "GOAL: 10000" into the XML and the Kotlin, so renaming a habit or
+  changing its goal in the app had no effect on the widget at all.
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@drawable/widget_background"
     android:orientation="vertical"
-    android:padding="12dp">
+    android:padding="10dp">
 
-    <!-- Header Row -->
+    <!-- Header: habit title + slot icon -->
     <RelativeLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
+
         <TextView
             android:id="@+id/habit_title"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_alignParentStart="true"
             android:layout_centerVertical="true"
-            android:text="STEP LEGEND"
+            android:layout_toStartOf="@+id/app_logo"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="HABIT"
             android:textColor="#FFFFFF"
-            android:textSize="12sp"
+            android:textSize="11sp"
             android:textStyle="bold" />
-            
+
         <ImageView
             android:id="@+id/app_logo"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
+            android:layout_width="22dp"
+            android:layout_height="22dp"
             android:layout_alignParentEnd="true"
             android:layout_centerVertical="true"
+            android:contentDescription="@string/widget_sensor_icon_desc"
             android:src="@drawable/widget_icon_steps" />
     </RelativeLayout>
 
-    <!-- Active State Content -->
+    <!-- Active state -->
     <LinearLayout
         android:id="@+id/habit_content"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:orientation="vertical"
-        android:gravity="center_vertical">
+        android:gravity="center_vertical"
+        android:orientation="vertical">
 
-        <!-- Main Metric + Visualizer Row -->
+        <!-- Value + animation -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:paddingStart="2dp"
-            android:paddingEnd="2dp">
+            android:orientation="horizontal">
 
-            <!-- Sensor Value & Unit -->
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
@@ -59,75 +70,106 @@
                     android:id="@+id/sensor_value"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
                     android:text="0"
                     android:textColor="#FFFFFF"
-                    android:textSize="22sp"
+                    android:textSize="26sp"
                     android:textStyle="bold" />
 
                 <TextView
                     android:id="@+id/sensor_unit"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="STEPS"
+                    android:letterSpacing="0.08"
+                    android:text=""
                     android:textColor="#AAAAAA"
                     android:textSize="8sp"
                     android:textStyle="bold" />
             </LinearLayout>
 
-            <!-- Animated Theme Visualizer ViewFlipper -->
+            <!--
+              Six dot-matrix frames. The renderer points these at one of the
+              anim_<sequence>_f1..f6 asset sets: the slot's own idle sequence
+              while the habit is in progress, and anim_complete_* once it is done,
+              which is what makes a finished habit feel finished on the home screen.
+            -->
             <ViewFlipper
                 android:id="@+id/habit_anim_flipper"
-                android:layout_width="52dp"
-                android:layout_height="32dp"
+                android:layout_width="48dp"
+                android:layout_height="34dp"
                 android:autoStart="true"
-                android:flipInterval="800">
+                android:flipInterval="400">
 
                 <ImageView
                     android:id="@+id/habit_anim_frame1"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    android:src="@drawable/anim_step_frame1" />
+                    android:contentDescription="@string/widget_sensor_anim_desc"
+                    android:src="@drawable/anim_step_f1" />
 
                 <ImageView
                     android:id="@+id/habit_anim_frame2"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    android:src="@drawable/anim_step_frame2" />
+                    android:contentDescription="@string/widget_sensor_anim_desc"
+                    android:src="@drawable/anim_step_f2" />
 
                 <ImageView
                     android:id="@+id/habit_anim_frame3"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    android:src="@drawable/anim_step_frame3" />
+                    android:contentDescription="@string/widget_sensor_anim_desc"
+                    android:src="@drawable/anim_step_f3" />
+
+                <ImageView
+                    android:id="@+id/habit_anim_frame4"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:contentDescription="@string/widget_sensor_anim_desc"
+                    android:src="@drawable/anim_step_f4" />
+
+                <ImageView
+                    android:id="@+id/habit_anim_frame5"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:contentDescription="@string/widget_sensor_anim_desc"
+                    android:src="@drawable/anim_step_f5" />
+
+                <ImageView
+                    android:id="@+id/habit_anim_frame6"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:contentDescription="@string/widget_sensor_anim_desc"
+                    android:src="@drawable/anim_step_f6" />
             </ViewFlipper>
         </LinearLayout>
 
-        <!-- Progress Bar & Goal Row -->
+        <!-- Progress + status -->
         <LinearLayout
             android:id="@+id/habit_progress_container"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:layout_marginTop="4dp">
-            
+            android:layout_marginTop="3dp"
+            android:orientation="vertical">
+
             <ProgressBar
                 android:id="@+id/habit_progress"
                 style="?android:attr/progressBarStyleHorizontal"
                 android:layout_width="match_parent"
                 android:layout_height="4dp"
                 android:progressDrawable="@drawable/widget_progress_bar" />
-                
+
             <RelativeLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="2dp">
-                
+
                 <TextView
                     android:id="@+id/habit_status_badge"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_alignParentStart="true"
-                    android:text="IN PROGRESS"
+                    android:text=""
                     android:textColor="#D71921"
                     android:textSize="8sp"
                     android:textStyle="bold" />
@@ -137,37 +179,93 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_alignParentEnd="true"
-                    android:text="GOAL: 10000"
+                    android:text=""
                     android:textColor="#666666"
                     android:textSize="8sp" />
             </RelativeLayout>
+
+            <!--
+              Secondary status line. Load-bearing for Digital Sunset, where the
+              raw number cannot tell you whether you are winning: "3 / 5" means
+              nothing until you know smaller is better and the window is still open.
+            -->
+            <TextView
+                android:id="@+id/habit_note"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="1dp"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text=""
+                android:textColor="#8A8A8A"
+                android:textSize="8sp" />
         </LinearLayout>
 
-        <!-- Interactive Action Controls Row -->
+        <!--
+          In-place controls. Up to three; the renderer hides the ones this habit
+          type does not use. Weighted at 0dp so a hidden button gives its space back.
+        -->
         <LinearLayout
             android:id="@+id/habit_control_row"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center"
-            android:layout_marginTop="4dp">
+            android:layout_marginTop="5dp"
+            android:baselineAligned="false"
+            android:orientation="horizontal">
 
             <TextView
-                android:id="@+id/habit_action_btn"
-                android:layout_width="match_parent"
+                android:id="@+id/habit_btn_1"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="@drawable/widget_item_bg"
+                android:ellipsize="end"
                 android:gravity="center"
-                android:paddingTop="4dp"
-                android:paddingBottom="4dp"
-                android:text="✓ COMPLETE NOW"
+                android:maxLines="1"
+                android:paddingTop="5dp"
+                android:paddingBottom="5dp"
+                android:text=""
                 android:textColor="#FFFFFF"
                 android:textSize="10sp"
-                android:textStyle="bold"
-                android:background="@drawable/widget_item_bg" />
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/habit_btn_2"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:layout_weight="1"
+                android:background="@drawable/widget_item_bg"
+                android:ellipsize="end"
+                android:gravity="center"
+                android:maxLines="1"
+                android:paddingTop="5dp"
+                android:paddingBottom="5dp"
+                android:text=""
+                android:textColor="#FFFFFF"
+                android:textSize="10sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/habit_btn_3"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:layout_weight="1"
+                android:background="@drawable/widget_item_bg"
+                android:ellipsize="end"
+                android:gravity="center"
+                android:maxLines="1"
+                android:paddingTop="5dp"
+                android:paddingBottom="5dp"
+                android:text=""
+                android:textColor="#FFFFFF"
+                android:textSize="10sp"
+                android:textStyle="bold" />
         </LinearLayout>
     </LinearLayout>
 
-    <!-- Empty State Content (Icon + Action Button) -->
+    <!-- Empty state: no habit occupies this slot yet -->
     <LinearLayout
         android:id="@+id/habit_empty_container"
         android:layout_width="match_parent"
@@ -179,15 +277,17 @@
 
         <ImageView
             android:id="@+id/habit_empty_icon"
-            android:layout_width="38dp"
-            android:layout_height="38dp"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
             android:layout_marginBottom="6dp"
+            android:contentDescription="@string/widget_sensor_icon_desc"
             android:src="@drawable/widget_icon_steps" />
 
         <TextView
             android:id="@+id/habit_empty_btn"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:background="@drawable/widget_login_btn_bg"
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
             android:paddingTop="5dp"
@@ -195,8 +295,17 @@
             android:text="+ LINK HABIT"
             android:textColor="#D71921"
             android:textSize="11sp"
-            android:textStyle="bold"
-            android:background="@drawable/widget_login_btn_bg" />
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/habit_empty_hint"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:gravity="center"
+            android:text=""
+            android:textColor="#666666"
+            android:textSize="8sp" />
     </LinearLayout>
 
 </LinearLayout>

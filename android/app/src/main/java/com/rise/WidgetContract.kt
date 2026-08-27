@@ -1,0 +1,501 @@
+package com.rise
+
+import android.content.Context
+import android.content.Intent
+import android.content.SharedPreferences
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.UUID
+
+/**
+ * WidgetContract
+ * ==============
+ * Kotlin mirror of src/services/WidgetContract.ts. Keep the two in lockstep:
+ * SharedPreferences is an untyped string bag, so nothing but discipline keeps
+ * the JS and native halves agreeing on key names.
+ *
+ * Prose overview: docs/WIDGET_CONTRACT.md
+ */
+object WidgetContract {
+
+    // -----------------------------------------------------------------------
+    // SharedPreferences
+    // -----------------------------------------------------------------------
+
+    const val PREFS_NAME = "RiseWidgetPrefs"
+
+    const val KEY_WIDGET_DATA = "widgetData"
+    const val KEY_WIDGET_LABELS = "widgetLabels"
+    const val KEY_SELECTED_LABEL = "selectedLabel"
+    const val KEY_TIMER_DATA = "timerData"
+    const val KEY_HABIT_HISTORY = "habitHistoryData"
+    const val KEY_PINNED_HABIT_ID = "pinnedHabitId"
+    const val KEY_PINNED_HABIT_TITLE = "pinnedHabitTitle"
+
+    /** Written by JS. The authoritative habit state for the sensor widgets. */
+    const val KEY_SENSOR_DATA = "sensorData"
+
+    /** Written by the foreground service. Live values overlaid on KEY_SENSOR_DATA. */
+    const val KEY_SENSOR_RUNTIME = "sensorRuntime"
+
+    /** Written natively when the user taps a control with JS not running. Drained by JS. */
+    const val KEY_PENDING_OPS = "pendingOps"
+
+    /** Written by JS. Config the service needs (sunset window, noise threshold...). */
+    const val KEY_SENSOR_CONFIG = "sensorConfig"
+
+    // -- Native-private runtime state -------------------------------------
+    // Only SensorForegroundService reads or writes these. They are kept in the
+    // same prefs file so a single clear() wipes everything.
+
+    /** TYPE_STEP_COUNTER value at the start of the current day. */
+    const val KEY_STEP_BASELINE = "nativeStepBaseline"
+    /** Steps banked before a reboot reset the hardware counter to zero. */
+    const val KEY_STEP_CARRY = "nativeStepCarry"
+    const val KEY_STEP_DATE = "nativeStepDate"
+    /** Unlocks observed inside the current Digital Sunset window. */
+    const val KEY_UNLOCKS = "nativeUnlocks"
+    /** The night the unlock count belongs to (date of the cutoff evening). */
+    const val KEY_UNLOCK_WINDOW = "nativeUnlockWindow"
+    /** Seconds of accrued silence today. */
+    const val KEY_NOISE_SECONDS = "nativeNoiseSeconds"
+    const val KEY_NOISE_DATE = "nativeNoiseDate"
+    /** Metres walked/ridden today. */
+    const val KEY_GPS_METERS = "nativeGpsMeters"
+    const val KEY_GPS_DATE = "nativeGpsDate"
+    /** Last window we auto-resolved, so a clean night is only banked once. */
+    const val KEY_SUNSET_RESOLVED = "nativeSunsetResolved"
+    /** Set while the service is running, so the app can tell on cold start. */
+    const val KEY_SERVICE_RUNNING = "nativeServiceRunning"
+
+    @JvmStatic
+    fun prefs(context: Context): SharedPreferences =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    /**
+     * Local calendar date, YYYY-MM-DD.
+     *
+     * Must be local, not UTC: for a user at UTC+5:30 a UTC date rolls over at
+     * 05:30 local, so anything recorded between midnight and 05:30 would land on
+     * the previous day.
+     */
+    @JvmStatic
+    fun localDate(millis: Long = System.currentTimeMillis()): String {
+        val c = java.util.Calendar.getInstance()
+        c.timeInMillis = millis
+        return String.format(
+            java.util.Locale.US, "%04d-%02d-%02d",
+            c.get(java.util.Calendar.YEAR),
+            c.get(java.util.Calendar.MONTH) + 1,
+            c.get(java.util.Calendar.DAY_OF_MONTH)
+        )
+    }
+
+    /** Parse "HH:mm" into minutes past midnight. Returns null when malformed. */
+    @JvmStatic
+    fun parseClock(hhmm: String?): Int? {
+        val parts = (hhmm ?: "").split(":")
+        if (parts.size != 2) return null
+        val h = parts[0].toIntOrNull() ?: return null
+        val m = parts[1].toIntOrNull() ?: return null
+        if (h !in 0..23 || m !in 0..59) return null
+        return h * 60 + m
+    }
+
+    // -----------------------------------------------------------------------
+    // Slots
+    // -----------------------------------------------------------------------
+
+    const val SLOT_PEDOMETER = "pedometer"
+    const val SLOT_GPS = "gps"
+    const val SLOT_NOISE = "noise"
+    const val SLOT_MOVEMENT = "movement"
+    const val SLOT_SCREEN = "screen"
+
+    val ALL_SLOTS = listOf(SLOT_PEDOMETER, SLOT_GPS, SLOT_NOISE, SLOT_MOVEMENT, SLOT_SCREEN)
+
+    /** Metadata keys inside the sensorData object are prefixed with '_' and are not slots. */
+    const val META_KEY = "_meta"
+    const val SENSOR_PAYLOAD_VERSION = 2
+
+    @JvmStatic
+    fun isMetaKey(key: String) = key.startsWith("_")
+
+    // -----------------------------------------------------------------------
+    // Slot field names  (must match SensorSlotPayload in the TS contract)
+    // -----------------------------------------------------------------------
+
+    const val F_EXISTS = "exists"
+    const val F_ID = "id"
+    const val F_TEMPLATE_ID = "templateId"
+    const val F_TITLE = "title"
+    const val F_HABIT_TYPE = "habitType"
+    const val F_PROGRESS = "progress"
+    const val F_GOAL = "goal"
+    const val F_UNIT = "unit"
+    const val F_STEP = "step"
+    const val F_DISPLAY_MODE = "displayMode"
+    const val F_GOAL_DIRECTION = "goalDirection"
+    const val F_IS_COMPLETED = "isCompleted"
+    const val F_STREAK = "streak"
+    const val F_CONTROLS = "controls"
+    const val F_LIVE = "live"
+    const val F_NOTE = "note"
+
+    /**
+     * The habit-day a runtime overlay describes, YYYY-MM-DD local.
+     *
+     * Only ever written into KEY_SENSOR_RUNTIME, never into the JS payload. Without
+     * it a stale overlay outlives the day it belongs to: the service resets its
+     * counters in rollDayIfNeeded, which only runs while the service is ticking, so
+     * a service killed before midnight leaves yesterday's step count sitting in
+     * prefs where readSlot's maxOf would prefer it over today's real zero.
+     */
+    const val F_DATE = "date"
+
+    const val F_META_VERSION = "version"
+    const val F_META_SYNCED_AT = "syncedAt"
+    const val F_META_LOGGED_IN = "loggedIn"
+
+    // -----------------------------------------------------------------------
+    // Display modes and goal direction
+    // -----------------------------------------------------------------------
+
+    const val DISPLAY_INT = "int"
+    const val DISPLAY_DISTANCE = "distance"
+    const val DISPLAY_DURATION = "duration"
+    const val DISPLAY_SUNSET = "sunset"
+
+    const val DIR_AT_LEAST = "atLeast"
+    const val DIR_AT_MOST = "atMost"
+
+    // -----------------------------------------------------------------------
+    // Controls
+    // -----------------------------------------------------------------------
+
+    const val CTRL_DEC = "dec"
+    const val CTRL_INC = "inc"
+    const val CTRL_CHECK = "check"
+    const val CTRL_TIMER = "timer"
+    const val CTRL_CONFIRM = "confirm"
+    const val CTRL_SLIPPED = "slipped"
+    const val CTRL_REFRESH = "refresh"
+
+    /** Label drawn on each control button. */
+    @JvmStatic
+    fun controlLabel(control: String, step: Double, displayMode: String): String = when (control) {
+        CTRL_DEC -> "−" + formatStep(step, displayMode)
+        CTRL_INC -> "+" + formatStep(step, displayMode)
+        CTRL_CHECK -> "✓ DONE"
+        CTRL_TIMER -> "+" + formatStep(step, displayMode)
+        CTRL_CONFIRM -> "✓ HELD"
+        CTRL_SLIPPED -> "✕ SLIPPED"
+        CTRL_REFRESH -> "↻"
+        else -> control.uppercase()
+    }
+
+    private fun formatStep(step: Double, displayMode: String): String = when (displayMode) {
+        DISPLAY_DURATION -> "${(step / 60).toInt().coerceAtLeast(1)}M"
+        DISPLAY_DISTANCE -> if (step < 1.0) "${(step * 1000).toInt()}M" else trimNumber(step)
+        else -> trimNumber(step)
+    }
+
+    // -----------------------------------------------------------------------
+    // Pending ops
+    // -----------------------------------------------------------------------
+
+    const val OP_INC = "inc"
+    const val OP_TOGGLE = "toggle"
+    const val OP_TIMER_ADD = "timerAdd"
+    const val OP_SUNSET_CONFIRM = "sunsetConfirm"
+    const val OP_SUNSET_SLIPPED = "sunsetSlipped"
+
+    const val PENDING_OPS_MAX = 200
+
+    /** Which op a control button fires, or null for a pure redraw. */
+    @JvmStatic
+    fun opForControl(control: String): String? = when (control) {
+        CTRL_DEC, CTRL_INC -> OP_INC
+        CTRL_CHECK -> OP_TOGGLE
+        CTRL_TIMER -> OP_TIMER_ADD
+        CTRL_CONFIRM -> OP_SUNSET_CONFIRM
+        CTRL_SLIPPED -> OP_SUNSET_SLIPPED
+        else -> null
+    }
+
+    /**
+     * Append an op to the queue JS will drain on next foreground.
+     * Trims from the front so the blob stays bounded.
+     *
+     * `date` names the habit-day the op belongs to. Pass it explicitly for the
+     * Digital Sunset window, which straddles midnight.
+     */
+    @JvmStatic
+    @JvmOverloads
+    fun enqueueOp(
+        context: Context,
+        op: String,
+        habitId: String,
+        slot: String,
+        amount: Double,
+        date: String? = null
+    ) {
+        val p = prefs(context)
+        val arr = try {
+            JSONArray(p.getString(KEY_PENDING_OPS, "[]") ?: "[]")
+        } catch (e: Exception) {
+            JSONArray()
+        }
+        arr.put(JSONObject().apply {
+            put("opId", UUID.randomUUID().toString())
+            put("op", op)
+            put("habitId", habitId)
+            put("slot", slot)
+            put("amount", amount)
+            put("ts", System.currentTimeMillis())
+            if (date != null) put("date", date)
+        })
+        val trimmed = if (arr.length() > PENDING_OPS_MAX) {
+            JSONArray().also { out ->
+                for (i in (arr.length() - PENDING_OPS_MAX) until arr.length()) out.put(arr.get(i))
+            }
+        } else arr
+        p.edit().putString(KEY_PENDING_OPS, trimmed.toString()).apply()
+    }
+
+    // -----------------------------------------------------------------------
+    // Intents
+    // -----------------------------------------------------------------------
+
+    const val ACTION_WIDGET_UPDATE = "com.rise.WIDGET_UPDATE"
+    const val ACTION_WIDGET_CONTROL = "com.rise.WIDGET_CONTROL"
+    const val ACTION_TOGGLE_TASK = "com.rise.TOGGLE_TASK"
+    const val ACTION_TIMER_ACTION = "com.rise.TIMER_ACTION"
+
+    const val EXTRA_OP = "extra_op"
+    const val EXTRA_HABIT_ID = "extra_habit_id"
+    const val EXTRA_SLOT = "extra_slot"
+    const val EXTRA_AMOUNT = "extra_amount"
+
+    /**
+     * Proves a control broadcast came from one of our own PendingIntents.
+     *
+     * The five sensor receivers must stay exported so the widget host can deliver
+     * APPWIDGET_UPDATE, and an exported receiver can be targeted by an *explicit*
+     * intent from any app regardless of which intent-filters it declares. Leaving
+     * ACTION_WIDGET_CONTROL out of the manifest therefore hides the action but does
+     * not protect it: another app could still forge a tap and, by toggling a habit
+     * repeatedly, corrupt a real streak.
+     *
+     * The token closes that. It lives in our MODE_PRIVATE prefs, which no other app
+     * can read, and it only ever leaves the process inside a PendingIntent held by
+     * the widget host, whose extras a third party cannot inspect.
+     */
+    const val EXTRA_TOKEN = "extra_token"
+
+    private const val KEY_CONTROL_TOKEN = "nativeControlToken"
+
+    /** The current token, minted on first use and stable for the install. */
+    @JvmStatic
+    fun controlToken(context: Context): String {
+        val p = prefs(context)
+        p.getString(KEY_CONTROL_TOKEN, null)?.takeIf { it.isNotEmpty() }?.let { return it }
+        val minted = UUID.randomUUID().toString()
+        p.edit().putString(KEY_CONTROL_TOKEN, minted).apply()
+        return minted
+    }
+
+    /** True only for a control intent carrying this install's token. */
+    @JvmStatic
+    fun isTrustedControl(context: Context, intent: Intent): Boolean {
+        val supplied = intent.getStringExtra(EXTRA_TOKEN) ?: return false
+        return supplied.isNotEmpty() && supplied == controlToken(context)
+    }
+
+    @JvmStatic
+    fun deepLinkHabitDetail(habitId: String) = "rise://item/$habitId/habit"
+
+    @JvmStatic
+    fun deepLinkAddSensorHabit(templateId: String) = "rise://add-sensor-habit/$templateId"
+
+    /** Broadcast every widget provider so they redraw from prefs. */
+    @JvmStatic
+    fun broadcastUpdate(context: Context) {
+        context.sendBroadcast(Intent(ACTION_WIDGET_UPDATE).setPackage(context.packageName))
+    }
+
+    // -----------------------------------------------------------------------
+    // Foreground service
+    // -----------------------------------------------------------------------
+
+    const val SERVICE_ACTION_START = "com.rise.sensor.START"
+    const val SERVICE_ACTION_STOP = "com.rise.sensor.STOP"
+    const val SERVICE_ACTION_REFRESH = "com.rise.sensor.REFRESH"
+    const val SERVICE_CHANNEL_ID = "rise_sensors"
+    const val SERVICE_NOTIFICATION_ID = 4711
+
+    // -----------------------------------------------------------------------
+    // Digital Sunset defaults
+    // -----------------------------------------------------------------------
+
+    const val SUNSET_CUTOFF_DEFAULT = "22:00"
+    const val SUNSET_WINDOW_END_DEFAULT = "06:00"
+    const val SUNSET_ALLOWANCE_MINUTES_DEFAULT = 5
+
+    const val VERIFY_USAGESTATS = "usagestats"
+    const val VERIFY_UNLOCKS = "unlocks"
+    const val VERIFY_MANUAL = "manual"
+
+    // -----------------------------------------------------------------------
+    // Shared read helpers
+    // -----------------------------------------------------------------------
+
+    /**
+     * Read the sensor payload with the native runtime overlay applied, so widgets
+     * show live values even when JS has not run for hours.
+     *
+     * Returns null if there is no readable payload at all; the caller should then
+     * render its empty state rather than stale hardcoded numbers.
+     *
+     * @param expectedDate the habit-day the caller is rendering, YYYY-MM-DD local.
+     *        The overlay is discarded unless it was written for that same day. Pass
+     *        null only when the caller genuinely does not care which day it gets.
+     */
+    @JvmStatic
+    @JvmOverloads
+    fun readSlot(context: Context, slot: String, expectedDate: String? = null): JSONObject? {
+        val p = prefs(context)
+        val base = try {
+            JSONObject(p.getString(KEY_SENSOR_DATA, "{}") ?: "{}")
+        } catch (e: Exception) {
+            return null
+        }
+        val meta = base.optJSONObject(META_KEY)
+        if (meta != null && meta.optInt(F_META_VERSION, 0) > SENSOR_PAYLOAD_VERSION) {
+            // Payload written by a newer JS than this APK understands.
+            return null
+        }
+        val slotObj = base.optJSONObject(slot) ?: return null
+
+        // Overlay live values from the service. Native only ever contributes
+        // progress / note / live -- never identity or goal, which JS owns.
+        try {
+            val runtime = JSONObject(p.getString(KEY_SENSOR_RUNTIME, "{}") ?: "{}")
+            val live = runtime.optJSONObject(slot)
+            val sameHabit = live != null && live.optString(F_ID) == slotObj.optString(F_ID)
+            // An undated overlay is one written by an older build of the service; it
+            // cannot be validated, and preferring an unvalidatable number over the
+            // correctly-dated one JS wrote is how the widget ends up showing
+            // yesterday. The service redates it within one tick of starting.
+            val sameDay = live != null &&
+                expectedDate != null &&
+                live.optString(F_DATE) == expectedDate
+            if (sameHabit && sameDay) {
+                if (live!!.has(F_PROGRESS)) {
+                    // The service is authoritative only when it is ahead, so a
+                    // stale runtime blob can never walk progress backwards. This
+                    // holds for inverse goals too: screen-time minutes and unlock
+                    // counts only ever grow inside a single window.
+                    val nativeProgress = live.optDouble(F_PROGRESS, 0.0)
+                    val jsProgress = slotObj.optDouble(F_PROGRESS, 0.0)
+                    slotObj.put(F_PROGRESS, maxOf(nativeProgress, jsProgress))
+                }
+                if (live.has(F_NOTE)) slotObj.put(F_NOTE, live.optString(F_NOTE))
+                slotObj.put(F_LIVE, true)
+            }
+        } catch (e: Exception) {
+            // A malformed runtime overlay must never break the base render.
+        }
+        return slotObj
+    }
+
+    @JvmStatic
+    fun isLoggedIn(context: Context): Boolean {
+        return try {
+            val base = JSONObject(prefs(context).getString(KEY_SENSOR_DATA, "{}") ?: "{}")
+            base.optJSONObject(META_KEY)?.optBoolean(F_META_LOGGED_IN, true) ?: true
+        } catch (e: Exception) {
+            true
+        }
+    }
+
+    @JvmStatic
+    fun controlsOf(slot: JSONObject): List<String> {
+        val arr = slot.optJSONArray(F_CONTROLS) ?: return emptyList()
+        return (0 until arr.length()).mapNotNull { arr.optString(it).takeIf { s -> s.isNotEmpty() } }
+    }
+
+    // -----------------------------------------------------------------------
+    // Shared formatting  (keeps all five sensor widgets visually identical)
+    // -----------------------------------------------------------------------
+
+    /** The big number on the widget face. */
+    @JvmStatic
+    fun formatValue(value: Double, displayMode: String): String = when (displayMode) {
+        DISPLAY_DISTANCE -> if (value < 1.0) "${(value * 1000).toInt()}" else trimNumber(value)
+        DISPLAY_DURATION -> "${(value / 60).toInt()}"
+        DISPLAY_SUNSET -> "${value.toInt()}"
+        else -> value.toInt().toString()
+    }
+
+    /** The unit caption under the big number, derived when JS did not supply one. */
+    @JvmStatic
+    fun formatUnit(value: Double, displayMode: String, supplied: String?): String {
+        if (!supplied.isNullOrEmpty()) {
+            // Distance flips between metres and km, so override only that case.
+            if (displayMode == DISPLAY_DISTANCE && value < 1.0) return "METRES"
+            return supplied.uppercase()
+        }
+        return when (displayMode) {
+            DISPLAY_DISTANCE -> if (value < 1.0) "METRES" else "KM"
+            DISPLAY_DURATION -> "MINUTES"
+            else -> ""
+        }
+    }
+
+    @JvmStatic
+    fun formatGoal(goal: Double, displayMode: String, direction: String): String {
+        if (goal <= 0.0) return ""
+        val prefix = if (direction == DIR_AT_MOST) "LIMIT" else "GOAL"
+        val body = when (displayMode) {
+            DISPLAY_DISTANCE -> if (goal < 1.0) "${(goal * 1000).toInt()}M" else "${trimNumber(goal)}KM"
+            DISPLAY_DURATION -> "${(goal / 60).toInt()}M"
+            else -> goal.toInt().toString()
+        }
+        return "$prefix: $body"
+    }
+
+    /**
+     * 0..100 for the ProgressBar.
+     *
+     * The same ratio serves both directions, but it reads differently: for an
+     * inverse goal the bar fills as the allowance is consumed, so a full bar means
+     * the limit is blown rather than the habit is done.
+     */
+    @JvmStatic
+    fun progressPercent(progress: Double, goal: Double, direction: String): Int {
+        if (goal <= 0.0) return 0
+        return ((progress / goal) * 100.0).coerceIn(0.0, 100.0).toInt()
+    }
+
+    /** Short status word shown next to the progress bar. */
+    @JvmStatic
+    fun statusBadge(slot: JSONObject): String {
+        val completed = slot.optBoolean(F_IS_COMPLETED, false)
+        val direction = slot.optString(F_GOAL_DIRECTION, DIR_AT_LEAST)
+        val progress = slot.optDouble(F_PROGRESS, 0.0)
+        val goal = slot.optDouble(F_GOAL, 0.0)
+        return when {
+            completed -> "COMPLETE"
+            direction == DIR_AT_MOST && goal > 0 && progress > goal -> "BROKEN"
+            direction == DIR_AT_MOST -> "HOLDING"
+            progress <= 0.0 -> "NOT STARTED"
+            else -> "IN PROGRESS"
+        }
+    }
+
+    private fun trimNumber(v: Double): String {
+        val oneDp = Math.round(v * 10.0) / 10.0
+        return if (oneDp == Math.floor(oneDp)) oneDp.toInt().toString() else oneDp.toString()
+    }
+}

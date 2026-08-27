@@ -1,9 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Sized for the controls the widget now carries. At the old 110x110dp the value,
+  progress bar, note line and control row could not all fit, so the buttons were
+  clipped off the bottom on a default placement. minResize* keeps the small size
+  available for anyone who wants it.
+
+  updatePeriodMillis is a safety net only: the real cadence comes from
+  SensorForegroundService, which broadcasts an update whenever a reading changes.
+-->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:initialLayout="@layout/widget_habit_sensor"
-    android:minWidth="110dp"
-    android:minHeight="110dp"
-    android:updatePeriodMillis="86400000"
+    android:minWidth="180dp"
+    android:minHeight="150dp"
+    android:minResizeWidth="110dp"
+    android:minResizeHeight="110dp"
+    android:targetCellWidth="4"
+    android:targetCellHeight="3"
+    android:updatePeriodMillis="1800000"
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen"
     android:previewImage="@drawable/widget_icon_steps"

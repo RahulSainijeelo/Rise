@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { StatusBar, View, NativeEventEmitter, NativeModules, Linking } from 'react-native';
+import { StatusBar, View, NativeEventEmitter, NativeModules, Linking, AppState } from 'react-native';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import { useTheme } from './src/theme';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -7,7 +7,9 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { notificationService } from './src/services/NotificationService';
 import { useAppStore } from './src/store/useAppStore';
 import { SettingsService } from './src/services/SettingsService';
-import { sensorService } from './src/services/SensorService';
+import { sensorService, localDate } from './src/services/SensorService';
+import { applyPendingWidgetOps } from './src/services/WidgetOpsService';
+import { requestSensorPermissions } from './src/utils/permissions';
 
 const { WidgetBridge } = NativeModules;
 const widgetEmitter = new NativeEventEmitter(WidgetBridge);
@@ -35,9 +37,40 @@ const App = () => {
           await login({ id: settings.defaultProfile, name: 'User' });
         }
       }
-      sensorService.startGlobalTracking(useAppStore.getState);
+
+      // Permissions before tracking: the foreground service narrows what it claims
+      // to what has actually been granted, so asking after starting it would leave
+      // it running with less capability than the user agreed to.
+      const missing = await requestSensorPermissions(useAppStore.getState().habits || []);
+      if (missing.length) {
+        console.warn('Sensor habits are missing permissions:', missing.join(', '));
+      }
+
+      await sensorService.ensureTracking(useAppStore.getState);
+
+      // Anything tapped on a widget while the app was closed.
+      await applyPendingWidgetOps(useAppStore.getState);
     };
     attemptAutoLogin();
+
+    /**
+     * Coming back to the foreground is the only moment we can reliably (re)start the
+     * foreground service — Android 12+ rejects the start from the background — and
+     * it is also when widget taps need collecting. Both are idempotent.
+     */
+    const appStateSub = AppState.addEventListener('change', (next) => {
+      if (next !== 'active') return;
+      applyPendingWidgetOps(useAppStore.getState);
+      sensorService.ensureTracking(useAppStore.getState);
+    });
+
+    // Keep the native service's config in step with the habits themselves, so
+    // editing a goal or a sunset cutoff takes effect without restarting the app.
+    const unsubscribeHabits = useAppStore.subscribe((state, prev) => {
+      if (state.habits !== prev.habits) {
+        sensorService.refreshConfig(useAppStore.getState);
+      }
+    });
 
     // Widget Action Listeners
     const timerSub = widgetEmitter.addListener('onTimerAction', (dataString) => {
@@ -55,18 +88,29 @@ const App = () => {
       try {
         const data = JSON.parse(dataString);
         if (data.action === 'toggle') {
-          const today = new Date().toISOString().split('T')[0];
-          toggleHabit(data.id, today);
+          toggleHabit(data.id, localDate());
         }
       } catch (e) {
         console.error('Failed to parse habit action', e);
       }
     });
 
-    // Handle Deep Links (Widget Actions)
+    /**
+     * Deep links, for navigation and for the older task/habit widgets.
+     *
+     * The sensor widgets no longer route state changes through here — their controls
+     * broadcast to the provider and queue a PendingOp, so a tap on "+100" no longer
+     * has to open the app to count. What remains is navigation plus the legacy
+     * `habit-action` links, kept so a widget rendered by an older build of the app
+     * that is still sitting on someone's home screen does not become a dead button.
+     */
     const handleDeepLink = (event: { url: string }) => {
       const url = event.url;
       console.log('Deep link received:', url);
+
+      // Local, not UTC. `toISOString()` does not roll over until 05:30 for a user at
+      // UTC+5:30, so an early-morning tap used to be credited to yesterday.
+      const today = localDate();
 
       if (url.includes('rise://timer-action/')) {
         const parts = url.replace('rise://timer-action/', '').split('/');
@@ -77,14 +121,12 @@ const App = () => {
         else if (action === 'stop') stopTimer();
       } else if (url.includes('rise://habit-toggle/')) {
         const habitId = url.replace('rise://habit-toggle/', '');
-        const today = new Date().toISOString().split('T')[0];
         toggleHabit(habitId, today);
       } else if (url.includes('rise://habit-action/')) {
         const parts = url.replace('rise://habit-action/', '').split('/');
         const actionType = parts[0];
         const targetId = parts[1];
         const extra = parts[2];
-        const today = new Date().toISOString().split('T')[0];
 
         if (actionType === 'toggle' && targetId) {
           toggleHabit(targetId, today);
@@ -92,17 +134,12 @@ const App = () => {
           const amount = parseInt(extra) || 100;
           useAppStore.getState().updateNumericProgress(targetId, today, amount);
         } else if (actionType === 'silence-toggle' && targetId) {
-          const store = useAppStore.getState();
-          const habit = store.habits.find(h => h.id === targetId);
-          if (habit) {
-            const currentProgress = habit.timerProgress?.[today] || 0;
-            store.updateTimerProgress(targetId, today, 300); // 5 mins
-          }
+          useAppStore.getState().updateTimerProgress(targetId, today, 300); // 5 mins
         }
       }
     };
 
-    Linking.addEventListener('url', handleDeepLink);
+    const linkSub = Linking.addEventListener('url', handleDeepLink);
     Linking.getInitialURL().then(url => {
       if (url) handleDeepLink({ url });
     });
@@ -110,6 +147,9 @@ const App = () => {
     return () => {
       timerSub.remove();
       habitSub.remove();
+      appStateSub.remove();
+      linkSub.remove();
+      unsubscribeHabits();
     };
   }, []);
 

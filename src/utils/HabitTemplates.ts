@@ -1,3 +1,14 @@
+export type SensorType = 'pedometer' | 'screen' | 'noise' | 'movement' | 'gps';
+/**
+ * 'atLeast' (default) — you win by reaching the goal.
+ * 'atMost'  — you win by staying under it. Completion cannot be inferred from
+ *             progress alone, only committed when the window closes or the user
+ *             confirms. See docs/WIDGET_CONTRACT.md.
+ */
+export type GoalDirection = 'atLeast' | 'atMost';
+
+export type SunsetVerification = 'usagestats' | 'unlocks' | 'manual';
+
 export interface HabitTemplate {
     id: string;
     title: string;
@@ -8,6 +19,7 @@ export interface HabitTemplate {
     icon: string;
     goal?: number;
     unit?: string;
+    goalDirection?: GoalDirection;
     // Atomic Habit Laws
     cue: string;
     craving: string;
@@ -16,8 +28,17 @@ export interface HabitTemplate {
     howToApply: string;
     // Sensor Information
     isSensorBased?: boolean;
-    sensorType?: 'pedometer' | 'light' | 'screen' | 'noise' | 'movement' | 'gps';
+    sensorType?: SensorType;
     requiredPermissions?: string[];
+    /** Ambient dB at or below which a 'noise' habit's timer accrues. */
+    noiseThresholdDb?: number;
+    /** Start of a nightly window, 'HH:mm'. Used by 'screen' habits. */
+    cutoffTime?: string;
+    /** End of that window the following morning, 'HH:mm'. */
+    windowEndTime?: string;
+    /** Minutes of post-cutoff phone use still counted as a success. */
+    allowanceMinutes?: number;
+    sunsetVerification?: SunsetVerification;
 }
 
 export const COMMON_HABITS_TEMPLATES: HabitTemplate[] = [
@@ -134,17 +155,29 @@ export const COMMON_HABITS_TEMPLATES: HabitTemplate[] = [
     {
         id: 'digital_sunset',
         title: 'Digital Sunset',
-        description: 'Ensure no phone usage after your sunset time.',
-        type: 'check',
+        description: 'Keep phone use under 5 minutes between 22:00 and 06:00.',
+        type: 'numeric',
         category: 'Bad Habit',
         color: '#FB7185',
         icon: 'Moon',
+        // Inverse goal: the number counts *against* you. 5 minutes of grace so a
+        // glance at the clock or a reply to one message does not void the night.
+        goal: 5,
+        unit: 'minutes',
+        goalDirection: 'atMost',
+        cutoffTime: '22:00',
+        windowEndTime: '06:00',
+        allowanceMinutes: 5,
+        sunsetVerification: 'usagestats',
         isSensorBased: true,
         sensorType: 'screen',
-        requiredPermissions: [],
-        cue: 'The clock hitting 10:00 PM and your phone auto-dimming.',
+        // PACKAGE_USAGE_STATS is a special access grant, not a runtime permission:
+        // it cannot be requested with a dialog and must be opened in Settings.
+        // Without it the habit falls back to counting unlocks, which needs nothing.
+        requiredPermissions: ['android.permission.PACKAGE_USAGE_STATS'],
+        cue: 'The clock hitting 22:00 and your phone auto-dimming.',
         craving: 'Resisting the "one last scroll" that steals your sleep.',
-        response: 'Put the phone on the charger in another room (Verified by sensor).',
+        response: 'Put the phone on the charger in another room until 06:00.',
         reward: 'Waking up without dry eyes and with a clear head.',
         howToApply: 'Law 3: Make it difficult. A physical separation from your device.'
     },
@@ -158,6 +191,7 @@ export const COMMON_HABITS_TEMPLATES: HabitTemplate[] = [
         icon: 'VolumeX',
         goal: 3600, // 1 hour
         unit: 'seconds',
+        noiseThresholdDb: 45,
         isSensorBased: true,
         sensorType: 'noise',
         requiredPermissions: ['android.permission.RECORD_AUDIO', 'ios.permission.MICROPHONE'],
@@ -170,17 +204,21 @@ export const COMMON_HABITS_TEMPLATES: HabitTemplate[] = [
     {
         id: 'immediate_rise',
         title: 'Immediate Rise',
-        description: 'Defeat the snooze button by moving instantly.',
-        type: 'check',
+        description: 'Defeat the snooze button by taking 60 steps on waking.',
+        type: 'numeric',
         category: 'Health',
         color: '#38BDF8',
         icon: 'Zap',
+        // Was a bare 'check' with no goal, so a single detected step completed it.
+        // 60 steps is roughly the 50m walk the habit actually asks for.
+        goal: 60,
+        unit: 'steps',
         isSensorBased: true,
         sensorType: 'movement',
         requiredPermissions: ['android.permission.ACTIVITY_RECOGNITION', 'ios.permission.MOTION'],
         cue: 'Your alarm goes off at 7:00 AM.',
         craving: 'The instinct to hide under the covers for "5 more minutes".',
-        response: 'Walk 50 meters within 5 minutes (Verified by accelerometer).',
+        response: 'Take 60 steps within 5 minutes of the alarm (verified by motion sensor).',
         reward: 'Being the first person to start the day in your household.',
         howToApply: 'Law 3: Make it easy. Place your robe and slippers right next to bed.'
     },
@@ -204,3 +242,58 @@ export const COMMON_HABITS_TEMPLATES: HabitTemplate[] = [
         howToApply: 'Law 4: Make it satisfying. Check the commute savings in your weekly report.'
     }
 ];
+
+/** Look a template up by id. Returns undefined for hand-made habits. */
+export const findTemplate = (templateId?: string): HabitTemplate | undefined =>
+    templateId ? COMMON_HABITS_TEMPLATES.find(t => t.id === templateId) : undefined;
+
+/**
+ * Convert a template into the payload `addHabit` expects.
+ *
+ * Both places that create a habit from a template must go through this. They
+ * used to build the object inline and each forgot different fields — neither
+ * persisted `templateId`, which is what widgets bind on, and neither carried the
+ * Digital Sunset window, so the habit had no goal at all once created.
+ *
+ * `goalOverride` is the value the user typed on the knowledge screen; it is
+ * interpreted in the template's own unit (seconds for timers, the display unit
+ * otherwise).
+ */
+export const habitFromTemplate = (
+    template: HabitTemplate,
+    goalOverride?: number,
+    fallbackColor?: string
+) => {
+    const goal = (Number.isFinite(goalOverride) && (goalOverride as number) > 0)
+        ? (goalOverride as number)
+        : template.goal;
+
+    return {
+        templateId: template.id,
+        title: template.title,
+        description: template.description,
+        frequency: 'daily' as const,
+        type: template.type,
+        timerGoal: template.type === 'timer' ? goal : undefined,
+        numericGoal: template.type === 'numeric' ? goal : undefined,
+        numericUnit: template.unit,
+        goalDirection: template.goalDirection || 'atLeast',
+        reminders: [] as string[],
+        color: template.color || fallbackColor,
+        cue: template.cue,
+        craving: template.craving,
+        response: template.response,
+        reward: template.reward,
+        howToApply: template.howToApply,
+        isSensorBased: template.isSensorBased,
+        sensorType: template.sensorType,
+        requiredPermissions: template.requiredPermissions,
+        noiseThresholdDb: template.noiseThresholdDb,
+        // Sunset window. Carried even when undefined so that editing a habit
+        // later can distinguish "never configured" from "explicitly cleared".
+        cutoffTime: template.cutoffTime,
+        windowEndTime: template.windowEndTime,
+        allowanceMinutes: template.allowanceMinutes,
+        sunsetVerification: template.sunsetVerification,
+    };
+};

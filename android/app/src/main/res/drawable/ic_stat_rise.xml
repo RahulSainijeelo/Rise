@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Small icon for the sensor foreground service notification.
+
+  Must be a white-on-transparent vector, not the launcher mipmap: the system
+  discards a notification small icon's colour and keeps only its alpha, so a
+  full-colour icon renders as a solid grey blob in the status bar. Three
+  ascending bars with a leading dot to echo the dot-matrix widget frames.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M3,15h3.5v5H3z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M9,11h3.5v9H9z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M15,7h3.5v13H15z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M16.75,2.25m-2,0a2,2 0,1 1,4 0a2,2 0,1 1,-4 0" />
+</vector>

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { View, TouchableOpacity, ScrollView, Animated, Dimensions, Vibration, Modal, NativeModules, AppState } from 'react-native';
 const { WidgetBridge } = NativeModules;
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ArrowLeft, Play, Pause, RotateCcw, Flame, Trophy, Settings, Trash2, Check, X, Plus, Sparkles, Activity, Pin } from 'lucide-react-native';
+import { ArrowLeft, Play, Pause, RotateCcw, Flame, Trophy, Settings, Trash2, Check, X, Plus, Sparkles, Activity, Pin, PowerOff, Mic, MicOff } from 'lucide-react-native';
 import { HabitDetailScreenStyles as styles } from '../styles/Habit.styles';
 import dayjs from 'dayjs';
 import { useTheme } from '../theme';
@@ -17,7 +17,15 @@ const { width } = Dimensions.get('window');
 const CIRCLE_SIZE = width * 0.7;
 
 import { sensorService, type LiveSensorData } from '../services/SensorService';
-import { habitStep, formatHabitValue, isOverLimit as habitIsOverLimit } from '../utils/HabitMetrics';
+import type { SensorSlot } from '../services/WidgetContract';
+import {
+    habitStep,
+    formatHabitValue,
+    isOverLimit as habitIsOverLimit,
+    habitProgress,
+    habitDisplayMode,
+    isSensorDerived,
+} from '../utils/HabitMetrics';
 
 export const HabitDetailScreen = ({ route, navigation }: any) => {
     const { habitId } = route.params;
@@ -48,9 +56,54 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
     const isCompletedToday = habit?.completedDates.includes(today) || false;
     const isAtMost = (habit?.goalDirection || 'atLeast') === 'atMost';
 
+    // Which of the three kinds of sensor habit this is, because each gets a
+    // different control set: counters (steps/distance) get an on/off switch and no
+    // hand-editing, Deep Silence gets play/pause over the microphone, and Digital
+    // Sunset keeps its held/slipped judgement call.
+    const sensorSlot = (habit?.sensorType || null) as SensorSlot | null;
+    const sensorDerived = habit ? isSensorDerived(habit) : false;
+    const isNoiseHabit = habit?.sensorType === 'noise';
+
+    /**
+     * Is this habit's sensor actually collecting right now?
+     *
+     * Read out of the live snapshot rather than local state: the same switch exists
+     * on the widget and in the notification, so the app has to render whatever
+     * native currently believes instead of its own idea of it.
+     */
+    const trackingOn =
+        !liveData.pausedAll && !(sensorSlot ? liveData.paused.includes(sensorSlot) : false);
+
+    const toggleSensor = () => {
+        if (!sensorSlot) return;
+        Vibration.vibrate(20);
+        sensorService.setSlotTracking(sensorSlot, !trackingOn);
+    };
+
     useEffect(() => {
         if (!habit?.isSensorBased) return;
         return sensorService.subscribe(setLiveData);
+    }, [habit?.id, habit?.isSensorBased]);
+
+    /**
+     * Pull native's tracking state and last readings on open, and again on every
+     * return to the foreground.
+     *
+     * Both can change while JS is dead — a widget tap pauses a sensor, the service
+     * keeps counting steps for hours — so a screen that only listened for ticks
+     * would paint a stale OFF button and a zero step count for its first seconds.
+     */
+    useEffect(() => {
+        if (!habit?.isSensorBased) return;
+        const sync = () => {
+            sensorService.getTrackingState();
+            sensorService.loadRuntimeSnapshot();
+        };
+        sync();
+        const sub = AppState.addEventListener('change', (next) => {
+            if (next === 'active') sync();
+        });
+        return () => sub.remove();
     }, [habit?.id, habit?.isSensorBased]);
 
     /**
@@ -111,6 +164,10 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
     }, [isCompletedToday, habit?.isSensorBased]);
 
     useEffect(() => {
+        // Deep Silence's clock lives in the foreground service: it must keep running
+        // with the app closed and must survive being killed, so a JS setInterval is
+        // not allowed anywhere near it.
+        if (isNoiseHabit) return;
         if (isTimerRunning && timeLeft > 0) {
             timerRef.current = setInterval(() => {
                 setTimeLeft(prev => {
@@ -175,11 +232,94 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
         return `${m}:${s.toString().padStart(2, '0')}`;
     };
 
-    const progress = habit.type === 'timer' ? (timeLeft / (habit.timerGoal || 1)) : 0;
-
     const numericStep = habitStep(habit);
-    const displayedProgress = formatHabitValue(habit, today);
     const isOverLimit = habitIsOverLimit(habit, today);
+
+    /**
+     * Deep Silence's numbers, all of them persistent.
+     *
+     * The banked total is whatever the store has for today; the live reading is what
+     * the service has accrued since its last write. Taking the larger of the two
+     * means the display never goes backwards when the service restarts mid-day, and
+     * never sits at zero while waiting for the first tick after an app launch.
+     */
+    const noiseGoal = habit.timerGoal || 0;
+    const noiseElapsed = Math.max(habit.timerProgress?.[today] || 0, liveData.noiseSeconds || 0);
+    const noiseRemaining = Math.max(0, noiseGoal - noiseElapsed);
+
+    // Counters read from the sensor, not from the store, so the figure on screen
+    // moves as you walk instead of one commit behind.
+    const storedValue = habitProgress(habit, today);
+    const liveValue = habit.sensorType === 'gps' ? liveData.distanceMeters / 1000 : liveData.steps;
+    const shownValue = sensorDerived ? Math.max(storedValue, liveValue) : storedValue;
+    const isDistance = habitDisplayMode(habit) === 'distance';
+    const displayedProgress = sensorDerived
+        ? isDistance
+            ? shownValue < 1
+                ? `${Math.round(shownValue * 1000)}`
+                : shownValue.toFixed(1)
+            : `${Math.round(shownValue)}`
+        : formatHabitValue(habit, today);
+    // Below a kilometre the big number is metres, so the unit under it has to agree.
+    const displayedUnit =
+        sensorDerived && isDistance && shownValue < 1 ? 'M' : habit.numericUnit?.toUpperCase() || '';
+
+    const progress =
+        habit.type === 'timer'
+            ? isNoiseHabit
+                ? noiseRemaining / (noiseGoal || 1)
+                : timeLeft / (habit.timerGoal || 1)
+            : 0;
+
+    /**
+     * The only honest control for a sensor-measured habit: switch the sensor off.
+     *
+     * A + or − would edit a number the next reading overwrites a second later, and a
+     * manual "mark done" on a step goal is just a lie to your own streak. Switching
+     * the sensor off is real — it releases the hardware and stops the battery drain,
+     * and the banked count for today stays exactly where it was.
+     */
+    const SensorSwitch = () => (
+        <View style={{ alignItems: 'center', marginTop: 28 }}>
+            <TouchableOpacity
+                onPress={toggleSensor}
+                activeOpacity={0.8}
+                style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 10,
+                    paddingVertical: 14,
+                    paddingHorizontal: 24,
+                    borderRadius: 32,
+                    borderWidth: 1.5,
+                    borderColor: trackingOn ? theme.colors.success : theme.colors.border,
+                    backgroundColor: trackingOn ? theme.colors.success + '12' : 'transparent',
+                }}
+            >
+                {trackingOn ? (
+                    <Activity size={18} color={theme.colors.success} />
+                ) : (
+                    <PowerOff size={18} color={theme.colors.textSecondary} />
+                )}
+                <NothingText
+                    variant="bold"
+                    size={13}
+                    color={trackingOn ? theme.colors.success : theme.colors.textSecondary}
+                >
+                    {trackingOn ? 'TRACKING ON' : 'TRACKING OFF'}
+                </NothingText>
+            </TouchableOpacity>
+            <NothingText
+                size={11}
+                color={theme.colors.textSecondary}
+                style={{ marginTop: 10, paddingHorizontal: 40, textAlign: 'center' }}
+            >
+                {trackingOn
+                    ? 'Counted by the sensor, in the background, with the app closed. Tap to switch the sensor off — today’s count is kept.'
+                    : 'Sensor released. Nothing is being counted for this habit until you switch it back on.'}
+            </NothingText>
+        </View>
+    );
 
     const SensorInsight = () => {
         if (!habit.isSensorBased) return null;
@@ -190,7 +330,16 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
                     <Activity size={18} color={theme.colors.primary} />
                     <NothingText variant="bold" size={14} style={{ marginLeft: 8, fontFamily: 'ndot' }}>LIVE INSIGHTS</NothingText>
                     <View style={{ flex: 1 }} />
-                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: theme.colors.success, opacity: 0.8 }} />
+                    {/* Green means a sensor is genuinely feeding this card. Once it is
+                        paused the numbers are frozen, and a green dot over a frozen
+                        number is the one thing worse than no dot. */}
+                    <View style={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: 4,
+                        backgroundColor: trackingOn ? theme.colors.success : theme.colors.textSecondary,
+                        opacity: trackingOn ? 0.8 : 0.4,
+                    }} />
                 </View>
 
                 {habit.sensorType === 'pedometer' || habit.sensorType === 'movement' ? (
@@ -364,49 +513,101 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
                                     backgroundColor: theme.colors.background,
                                     opacity: 0.5
                                 }]} />
-                                <NothingText variant="dot" size={64}>{formatTime(timeLeft)}</NothingText>
+                                <NothingText variant="dot" size={64}>{formatTime(isNoiseHabit ? noiseRemaining : timeLeft)}</NothingText>
                             </View>
 
-                            <View style={styles.timerControls}>
-                                <TouchableOpacity
-                                    style={[styles.controlBtn, { backgroundColor: theme.colors.surface1 }]}
-                                    onPress={() => {
-                                        setIsTimerRunning(false);
-                                        setTimeLeft(habit.timerGoal || 0);
-                                    }}
-                                >
-                                    <RotateCcw size={24} color={theme.colors.text} />
-                                </TouchableOpacity>
+                            {isNoiseHabit ? (
+                                /* Deep Silence has exactly the controls its widget has:
+                                   the microphone switch and done/undo. The middle button
+                                   is a play/pause over the service, not over a local
+                                   interval, so the clock keeps running with the app
+                                   closed and picks up where it left off after a restart. */
+                                <>
+                                    <View style={[styles.timerControls, { justifyContent: 'center', gap: 28 }]}>
+                                        <TouchableOpacity
+                                            style={[styles.playBtn, { backgroundColor: trackingOn ? theme.colors.primary : theme.colors.surface1 }]}
+                                            onPress={toggleSensor}
+                                        >
+                                            {trackingOn ? (
+                                                <Pause size={32} color={theme.colors.background} fill={theme.colors.background} />
+                                            ) : (
+                                                <Play size={32} color={theme.colors.text} fill={theme.colors.text} />
+                                            )}
+                                        </TouchableOpacity>
 
-                                <TouchableOpacity
-                                    style={[styles.playBtn, { backgroundColor: theme.colors.primary }]}
-                                    onPress={() => setIsTimerRunning(!isTimerRunning)}
-                                >
-                                    {isTimerRunning ?
-                                        <Pause size={32} color={theme.colors.background} fill={theme.colors.background} /> :
-                                        <Play size={32} color={theme.colors.background} fill={theme.colors.background} />
-                                    }
-                                </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={[styles.controlBtn, { backgroundColor: theme.colors.surface1 }]}
+                                            onPress={() => toggleHabit(habitId, today)}
+                                        >
+                                            {isCompletedToday ? (
+                                                <X size={24} color={theme.colors.error} />
+                                            ) : (
+                                                <Check size={24} color={theme.colors.success} />
+                                            )}
+                                        </TouchableOpacity>
+                                    </View>
 
-                                <TouchableOpacity
-                                    style={[styles.controlBtn, { backgroundColor: theme.colors.surface1 }]}
-                                    onPress={() => {
-                                        setIsTimerRunning(false);
-                                        setTimeLeft(0);
-                                    }}
-                                >
-                                    <Check size={24} color={theme.colors.success} />
-                                </TouchableOpacity>
-                            </View>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 18 }}>
+                                        {trackingOn ? (
+                                            <Mic size={14} color={theme.colors.success} />
+                                        ) : (
+                                            <MicOff size={14} color={theme.colors.textSecondary} />
+                                        )}
+                                        <NothingText
+                                            variant="bold"
+                                            size={12}
+                                            color={trackingOn ? theme.colors.success : theme.colors.textSecondary}
+                                        >
+                                            {trackingOn ? `LISTENING · ${liveData.noise}dB` : 'MICROPHONE OFF'}
+                                        </NothingText>
+                                    </View>
+                                    <NothingText size={11} color={theme.colors.textSecondary} style={{ marginTop: 8, paddingHorizontal: 40, textAlign: 'center' }}>
+                                        {`${Math.floor(noiseElapsed / 60)}m ${noiseElapsed % 60}s of quiet banked today, under ${habit.noiseThresholdDb ?? 45}dB. The count is kept if you close Rise or restart your phone.`}
+                                    </NothingText>
+                                </>
+                            ) : (
+                                <View style={styles.timerControls}>
+                                    <TouchableOpacity
+                                        style={[styles.controlBtn, { backgroundColor: theme.colors.surface1 }]}
+                                        onPress={() => {
+                                            setIsTimerRunning(false);
+                                            setTimeLeft(habit.timerGoal || 0);
+                                        }}
+                                    >
+                                        <RotateCcw size={24} color={theme.colors.text} />
+                                    </TouchableOpacity>
+
+                                    <TouchableOpacity
+                                        style={[styles.playBtn, { backgroundColor: theme.colors.primary }]}
+                                        onPress={() => setIsTimerRunning(!isTimerRunning)}
+                                    >
+                                        {isTimerRunning ?
+                                            <Pause size={32} color={theme.colors.background} fill={theme.colors.background} /> :
+                                            <Play size={32} color={theme.colors.background} fill={theme.colors.background} />
+                                        }
+                                    </TouchableOpacity>
+
+                                    <TouchableOpacity
+                                        style={[styles.controlBtn, { backgroundColor: theme.colors.surface1 }]}
+                                        onPress={() => {
+                                            setIsTimerRunning(false);
+                                            setTimeLeft(0);
+                                        }}
+                                    >
+                                        <Check size={24} color={theme.colors.success} />
+                                    </TouchableOpacity>
+                                </View>
+                            )}
                         </View>
                     ) : habit.type === 'numeric' ? (
                         <View style={styles.checkContainer}>
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 32 }}>
-                                {/* Manual controls used to be hidden for every sensor habit,
-                                    which left Digital Sunset with no way to be completed at
-                                    all. Sensor habits now keep a manual override; only
-                                    inverse-goal habits swap it for a confirm/slipped pair. */}
-                                {!isAtMost && (
+                                {/* Manual controls are for habits a person counts. A
+                                    step, distance or movement goal is counted by the
+                                    sensor in real time, so + and − are gone there: they
+                                    could only edit a number the next reading overwrites.
+                                    Inverse-goal habits swap them for confirm/slipped. */}
+                                {!isAtMost && !sensorDerived && (
                                     <TouchableOpacity
                                         style={[styles.largeCheckBtn, { width: 80, height: 80, borderRadius: 40, borderColor: theme.colors.border }]}
                                         onPress={() => useAppStore.getState().updateNumericProgress(habitId, today, -numericStep)}
@@ -417,10 +618,10 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
 
                                 <View style={{ alignItems: 'center' }}>
                                     <NothingText variant="dot" size={80}>{displayedProgress}</NothingText>
-                                    <NothingText color={theme.colors.textSecondary}>{habit.numericUnit?.toUpperCase()}</NothingText>
+                                    <NothingText color={theme.colors.textSecondary}>{displayedUnit}</NothingText>
                                 </View>
 
-                                {!isAtMost && (
+                                {!isAtMost && !sensorDerived && (
                                     <TouchableOpacity
                                         style={[styles.largeCheckBtn, { width: 80, height: 80, borderRadius: 40, borderColor: theme.colors.border, backgroundColor: (habit.numericProgress?.[today] || 0) >= (habit.numericGoal || 1) ? theme.colors.success + '20' : 'transparent' }]}
                                         onPress={() => useAppStore.getState().updateNumericProgress(habitId, today, numericStep)}
@@ -438,6 +639,8 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
                                     : `${habit.numericGoal} ${habit.numericUnit}`
                                 }
                             </NothingText>
+
+                            {sensorDerived && <SensorSwitch />}
 
                             {isAtMost && (
                                 <>
@@ -511,23 +714,30 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
                                         )}
                                     </View>
                                     <NothingText variant="bold" size={18} style={{ marginTop: 24, color: isCompletedToday ? theme.colors.success : theme.colors.text }}>
-                                        {isCompletedToday ? 'GOAL REACHED' : 'WAITING FOR SENSOR...'}
+                                        {isCompletedToday ? 'GOAL REACHED' : trackingOn ? 'WAITING FOR SENSOR...' : 'SENSOR OFF'}
                                     </NothingText>
-                                    {!isCompletedToday && (
+                                    {!isCompletedToday && trackingOn && (
                                         <NothingText size={12} color={theme.colors.textSecondary} style={{ marginTop: 8, paddingHorizontal: 40, textAlign: 'center' }}>
                                             This habit is automatically verified by your sensors. Keep moving!
                                         </NothingText>
                                     )}
-                                    {/* Sensors miss things — a phone left on a desk, a
-                                        permission not yet granted. Without an override a
-                                        sensor habit could never be closed out by hand. */}
-                                    <View style={{ marginTop: 20 }}>
-                                        <NothingButton
-                                            variant="secondary"
-                                            label={isCompletedToday ? 'UNDO' : 'MARK DONE MANUALLY'}
-                                            onPress={() => toggleHabit(habitId, today)}
-                                        />
-                                    </View>
+                                    {sensorDerived ? (
+                                        /* A step or distance goal cannot honestly be
+                                           closed by hand, so the switch replaces the
+                                           override rather than sitting beside it. */
+                                        <SensorSwitch />
+                                    ) : (
+                                        /* Digital Sunset is the judgement call: the phone
+                                           can measure the screen time but only the user
+                                           can say the evening was held. */
+                                        <View style={{ marginTop: 20 }}>
+                                            <NothingButton
+                                                variant="secondary"
+                                                label={isCompletedToday ? 'UNDO' : 'MARK DONE MANUALLY'}
+                                                onPress={() => toggleHabit(habitId, today)}
+                                            />
+                                        </View>
+                                    )}
                                 </View>
                             )}
                         </View>

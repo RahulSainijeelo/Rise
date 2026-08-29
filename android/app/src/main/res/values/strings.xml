@@ -6,7 +6,7 @@
     <string name="widget_tasks_desc">Quick access to your daily tasks and habit checkpoints.</string>
 
     <string name="widget_habits_label">Rise: Habit Matrix</string>
-    <string name="widget_habits_desc">Interactive habit heatmap and streak tracker.</string>
+    <string name="widget_habits_desc">Every habit by day. Tap today to tick one off.</string>
 
     <string name="widget_timer_label">Rise: Focus Timer</string>
     <string name="widget_timer_desc">Quick task focus timer with pause, resume, and switch controls.</string>

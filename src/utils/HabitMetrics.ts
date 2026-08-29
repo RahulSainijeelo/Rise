@@ -75,12 +75,35 @@ export const formatHabitValue = (habit: Habit, date: string): string => {
 };
 
 /**
+ * Habits whose progress is measured by a sensor, not entered by the user.
+ *
+ * 'noise' is excluded because Deep Silence is a clock rather than a counter: it
+ * gets a play/pause pair instead of a bare on/off. 'screen' is excluded because
+ * Digital Sunset is an inverse goal that still needs a held/slipped judgement
+ * call at the end of the window.
+ */
+export const SENSOR_DERIVED_TYPES = ['pedometer', 'movement', 'gps'] as const;
+
+export const isSensorDerived = (habit: Pick<Habit, 'sensorType'>): boolean =>
+    !!habit.sensorType &&
+    (SENSOR_DERIVED_TYPES as readonly string[]).includes(habit.sensorType);
+
+/**
  * Which control buttons this habit should offer, in draw order.
  * Mirrors the controls on the habit detail screen so the widget is not a
  * second-class surface.
  */
 export const habitControls = (habit: Habit): WidgetControl[] => {
+    // Step Legend, City Glider and Immediate Rise are counted by the sensor in
+    // real time. A + or − here would let the user hand-edit a number the next
+    // sensor reading overwrites, so the only honest control is switching the
+    // sensor off.
+    if (isSensorDerived(habit)) return ['track'];
     if (isInverseGoal(habit)) return ['confirm', 'slipped'];
+    // Deep Silence: the microphone is the clock, so the app screen's play/pause
+    // button *is* the sensor switch — a widget "add 5 minutes" button would bank
+    // silence nobody was silent for. Same two controls in both places.
+    if (habit.sensorType === 'noise') return ['track', 'check'];
     if (habit.type === 'check') return ['check'];
     if (habit.type === 'timer') return ['timer', 'check'];
     return ['dec', 'inc'];

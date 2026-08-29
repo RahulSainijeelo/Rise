@@ -73,11 +73,25 @@ class SensorForegroundService : Service(), SensorEventListener {
         private const val TICK_MS = 60_000L
 
         /**
-         * Floor between event-driven publishes. TYPE_STEP_COUNTER batches, so while
-         * walking it can fire every couple of seconds; broadcasting a widget redraw
-         * that often would be wasteful.
+         * Coalescing window for event-driven publishes.
+         *
+         * This used to be 20s, which is why steps and distance looked stale even with
+         * the service running: you could walk half a minute before the number moved.
+         * Two seconds is short enough to read as live and long enough that a batched
+         * TYPE_STEP_COUNTER burst does not turn into a burst of writes. A trailing
+         * publish is scheduled for events that land inside the window, so the last
+         * reading of a burst is never the one that gets dropped.
          */
-        private const val PUBLISH_THROTTLE_MS = 20_000L
+        private const val PUBLISH_COALESCE_MS = 2_000L
+
+        /**
+         * Floor between widget redraw broadcasts.
+         *
+         * Prefs are rewritten on every publish, so any redraw shows the newest number;
+         * this only limits how often all eight receivers are woken to redraw. The
+         * in-app screen gets the 2s cadence over the JS listener, where it matters.
+         */
+        private const val WIDGET_BROADCAST_MIN_MS = 10_000L
 
         /** Matches the JS accelerometer heuristic so both paths count alike. */
         private const val STEP_THRESHOLD = 14.5
@@ -96,6 +110,12 @@ class SensorForegroundService : Service(), SensorEventListener {
         private const val PERM_ACTIVITY_RECOGNITION = "android.permission.ACTIVITY_RECOGNITION"
         private const val PERM_PACKAGE_USAGE_STATS = "android.permission.PACKAGE_USAGE_STATS"
 
+        /** Request codes for the notification's PendingIntents; one each, no reuse. */
+        private const val RC_NOTIF_OPEN = 0
+        private const val RC_NOTIF_PAUSE = 1
+        private const val RC_NOTIF_RESUME = 2
+        private const val RC_NOTIF_QUIT = 3
+
         /**
          * Bridge back into JS. Held statically because the service has no handle on
          * the ReactContext; SensorBridge installs this when JS starts and clears it
@@ -112,6 +132,9 @@ class SensorForegroundService : Service(), SensorEventListener {
         @JvmStatic
         @JvmOverloads
         fun start(context: Context, configJson: String?, fromBoot: Boolean = false) {
+            // Anything other than a boot start is the app itself asking, and opening
+            // the app is the one thing that clears "quit completely".
+            if (!fromBoot) WidgetContract.setQuit(context, false)
             val intent = Intent(context, SensorForegroundService::class.java).apply {
                 action = WidgetContract.SERVICE_ACTION_START
                 putExtra(EXTRA_CONFIG, configJson)
@@ -207,6 +230,8 @@ class SensorForegroundService : Service(), SensorEventListener {
 
     private var currentDb = 0
     private var noiseSeconds = 0
+    /** noiseSeconds at the last persist, so accrual banks every ten seconds. */
+    private var lastNoisePersistSeconds = 0
     @Volatile
     private var noiseThreadRunning = false
     private var noiseThread: Thread? = null
@@ -220,11 +245,25 @@ class SensorForegroundService : Service(), SensorEventListener {
 
     private var dayKey = ""
     private var lastPublishMs = 0L
+    private var lastWidgetBroadcastMs = 0L
+
+    /** True while a trailing publish is already scheduled; see publishThrottled. */
+    private var publishPending = false
 
     /** True until the app itself (re)starts us; see EXTRA_FROM_BOOT. */
     private var startedFromBoot = false
 
     private val handler = Handler(Looper.getMainLooper())
+
+    private val publishRunnable = Runnable {
+        publishPending = false
+        try {
+            publish()
+        } catch (e: Exception) {
+            Log.w(TAG, "trailing publish failed", e)
+        }
+    }
+
     private val tick = object : Runnable {
         override fun run() {
             try {
@@ -273,6 +312,25 @@ class SensorForegroundService : Service(), SensorEventListener {
             return START_NOT_STICKY
         }
 
+        // "Quit completely" from the notification. Distinct from STOP: it also sets
+        // the quit flag, so BootReceiver leaves us alone until the app is opened.
+        if (intent?.action == WidgetContract.ACTION_QUIT) {
+            WidgetContract.setQuit(this, true)
+            stopEverything()
+            // Widgets must repaint: their sensors are now off, and saying so is the
+            // only way the user can tell this from a service that crashed.
+            WidgetContract.broadcastUpdate(this)
+            return START_NOT_STICKY
+        }
+
+        // Pause / resume keep the service alive. It costs nothing once every listener
+        // is unregistered, and it is what keeps the RESUME action in the shade
+        // reachable -- a stopped service has no notification to tap.
+        when (intent?.action) {
+            WidgetContract.ACTION_PAUSE_ALL -> WidgetContract.setPausedAll(this, true)
+            WidgetContract.ACTION_RESUME_ALL -> WidgetContract.setPausedAll(this, false)
+        }
+
         intent?.getStringExtra(EXTRA_CONFIG)?.let { saveConfig(it) }
         // Sticky restarts arrive with a null intent, so absence of the flag means
         // "not from boot" -- which is the safe default: it only ever adds capability.
@@ -297,6 +355,8 @@ class SensorForegroundService : Service(), SensorEventListener {
 
     private fun stopEverything() {
         handler.removeCallbacks(tick)
+        handler.removeCallbacks(publishRunnable)
+        publishPending = false
         try {
             sensorManager?.unregisterListener(this)
         } catch (e: Exception) { }
@@ -355,14 +415,18 @@ class SensorForegroundService : Service(), SensorEventListener {
     }
 
     private fun buildNotification(): Notification {
+        val pausedAll = WidgetContract.isPausedAll(this)
         val open = PendingIntent.getActivity(
-            this, 0,
+            this, RC_NOTIF_OPEN,
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        return NotificationCompat.Builder(this, WidgetContract.SERVICE_CHANNEL_ID)
-            .setContentTitle("Rise is tracking")
-            .setContentText(summaryLine())
+        val builder = NotificationCompat.Builder(this, WidgetContract.SERVICE_CHANNEL_ID)
+            .setContentTitle(if (pausedAll) "Rise tracking paused" else "Rise is tracking")
+            .setContentText(
+                if (pausedAll) "Every sensor is off. Tap RESUME to start counting again."
+                else summaryLine()
+            )
             // Mono vector, not the launcher mipmap: the system keeps only a small
             // icon's alpha, so a full-colour one shows as a grey blob.
             .setSmallIcon(R.drawable.ic_stat_rise)
@@ -371,8 +435,40 @@ class SensorForegroundService : Service(), SensorEventListener {
             .setSilent(true)
             .setShowWhen(false)
             .setContentIntent(open)
-            .build()
+
+        // The two actions are the whole reason this notification is worth expanding.
+        // An ongoing foreground-service notification cannot be swiped away, so
+        // without them the only way to stop Rise using the microphone or GPS would be
+        // to dig through system settings.
+        if (pausedAll) {
+            builder.addAction(
+                R.drawable.ic_stat_play, "RESUME",
+                serviceAction(WidgetContract.ACTION_RESUME_ALL, RC_NOTIF_RESUME)
+            )
+        } else {
+            builder.addAction(
+                R.drawable.ic_stat_pause, "PAUSE",
+                serviceAction(WidgetContract.ACTION_PAUSE_ALL, RC_NOTIF_PAUSE)
+            )
+        }
+        builder.addAction(
+            R.drawable.ic_stat_quit, "QUIT",
+            serviceAction(WidgetContract.ACTION_QUIT, RC_NOTIF_QUIT)
+        )
+        return builder.build()
     }
+
+    /**
+     * PendingIntent straight at this service rather than a broadcast: acting on a
+     * notification is an explicit user action, so a service start is allowed here
+     * even under Android 12+ background-start rules, and it skips a receiver hop.
+     */
+    private fun serviceAction(action: String, requestCode: Int): PendingIntent =
+        PendingIntent.getService(
+            this, requestCode,
+            Intent(this, SensorForegroundService::class.java).setAction(action),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
 
     private fun summaryLine(): String {
         val parts = mutableListOf<String>()
@@ -385,7 +481,14 @@ class SensorForegroundService : Service(), SensorEventListener {
                 else "$unlocks unlocks"
             )
         }
-        return if (parts.isEmpty()) "No sensor habits linked" else parts.joinToString(" · ")
+        // Only count pauses on slots a habit actually occupies, so a leftover pause
+        // for a slot with no habit in it does not show up as a mystery.
+        val pausedHere = WidgetContract.pausedSlots(this).count { config.has(it) }
+        if (pausedHere > 0) parts.add("$pausedHere paused")
+        return when {
+            parts.isNotEmpty() -> parts.joinToString(" · ")
+            else -> "No sensor habits linked"
+        }
     }
 
     /**
@@ -465,12 +568,21 @@ class SensorForegroundService : Service(), SensorEventListener {
         }
     }
 
-    private fun wantsSteps() =
-        config.has(WidgetContract.SLOT_PEDOMETER) || config.has(WidgetContract.SLOT_MOVEMENT)
+    /**
+     * A slot is only tracked when a habit occupies it AND the user has not switched
+     * it off. Every listener registration, every foreground-service type and the
+     * notification summary all flow from these four, so a pause genuinely releases
+     * the hardware instead of merely hiding the number.
+     */
+    private fun tracked(slot: String) =
+        config.has(slot) && WidgetContract.isSlotTracking(this, slot)
 
-    private fun wantsLocation() = config.has(WidgetContract.SLOT_GPS)
-    private fun wantsNoise() = config.has(WidgetContract.SLOT_NOISE)
-    private fun wantsScreen() = config.has(WidgetContract.SLOT_SCREEN)
+    private fun wantsSteps() =
+        tracked(WidgetContract.SLOT_PEDOMETER) || tracked(WidgetContract.SLOT_MOVEMENT)
+
+    private fun wantsLocation() = tracked(WidgetContract.SLOT_GPS)
+    private fun wantsNoise() = tracked(WidgetContract.SLOT_NOISE)
+    private fun wantsScreen() = tracked(WidgetContract.SLOT_SCREEN)
 
     private fun applyConfig() {
         rollDayIfNeeded()
@@ -708,6 +820,23 @@ class SensorForegroundService : Service(), SensorEventListener {
      * the app open and closed, which is exactly the class of bug this rewrite is
      * meant to remove.
      */
+    /**
+     * One accrued second of silence, handled on the main thread.
+     *
+     * Persisting every single second would rewrite the prefs file sixty times a
+     * minute for the whole session, so counters are banked every ten seconds; the
+     * publish itself is coalesced, so the visible timer still moves smoothly.
+     */
+    private fun onNoiseAccrued() {
+        val moved = noiseSeconds - lastNoisePersistSeconds
+        // The second test catches midnight, when noiseSeconds resets below the mark.
+        if (moved >= 10 || noiseSeconds < lastNoisePersistSeconds) {
+            lastNoisePersistSeconds = noiseSeconds
+            persistCounters()
+        }
+        publishThrottled()
+    }
+
     private fun startNoise() {
         if (noiseThreadRunning) return
         if (!hasPermission(Manifest.permission.RECORD_AUDIO)) {
@@ -760,6 +889,11 @@ class SensorForegroundService : Service(), SensorEventListener {
                         // currentDb == 0 means "no reading yet", not silence.
                         if (currentDb > 0 && currentDb < threshold) {
                             noiseSeconds += elapsed
+                            // The silence timer is the one number a user sits and
+                            // watches, so it must move without waiting for the minute
+                            // tick. Hand off to the main thread: everything else
+                            // persists and publishes from there.
+                            handler.post { onNoiseAccrued() }
                         }
                     }
                 }
@@ -961,14 +1095,27 @@ class SensorForegroundService : Service(), SensorEventListener {
         rollDayIfNeeded()
         if (wantsScreen()) evaluateSunset() else sunsetWindowOpen = false
         persistCounters()
-        publish()
+        publish(forceWidgets = true)
         updateNotification()
     }
 
+    /**
+     * Publish on a sensor event, at most once per coalescing window.
+     *
+     * Leading edge plus a trailing publish: the first event after a quiet spell is
+     * published immediately, and anything arriving inside the window schedules one
+     * catch-up publish. A plain "drop it if too soon" throttle loses the final
+     * reading of every burst, which for a step counter that batches is most of them.
+     */
     private fun publishThrottled() {
-        val now = System.currentTimeMillis()
-        if (now - lastPublishMs < PUBLISH_THROTTLE_MS) return
-        publish()
+        val since = System.currentTimeMillis() - lastPublishMs
+        if (since >= PUBLISH_COALESCE_MS) {
+            publish()
+            return
+        }
+        if (publishPending) return
+        publishPending = true
+        handler.postDelayed(publishRunnable, PUBLISH_COALESCE_MS - since)
     }
 
     /**
@@ -976,8 +1123,9 @@ class SensorForegroundService : Service(), SensorEventListener {
      * numbers to JS if it happens to be alive. Widgets first: they are the surface
      * that has to work when nothing else is running.
      */
-    private fun publish() {
-        lastPublishMs = System.currentTimeMillis()
+    private fun publish(forceWidgets: Boolean = false) {
+        val now = System.currentTimeMillis()
+        lastPublishMs = now
         val runtime = JSONObject()
 
         // applyConfig rolls the day before anything can publish, but a publish on a
@@ -1020,7 +1168,13 @@ class SensorForegroundService : Service(), SensorEventListener {
         try {
             WidgetContract.prefs(this).edit()
                 .putString(WidgetContract.KEY_SENSOR_RUNTIME, runtime.toString()).apply()
-            WidgetContract.broadcastUpdate(this)
+            // Prefs are rewritten every publish, so any redraw -- from any cause --
+            // picks up the newest number. The broadcast is what wakes all eight
+            // receivers, so it is rate-limited separately.
+            if (forceWidgets || now - lastWidgetBroadcastMs >= WIDGET_BROADCAST_MIN_MS) {
+                lastWidgetBroadcastMs = now
+                WidgetContract.broadcastUpdate(this)
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Could not publish runtime", e)
         }
@@ -1037,6 +1191,14 @@ class SensorForegroundService : Service(), SensorEventListener {
             put("sunsetDate", sunsetWindowDate)
             put("sunsetWindowOpen", sunsetWindowOpen)
             put("date", today)
+            // Pause state travels with the readings so the habit screen can grey a
+            // sensor out the moment it is switched off from the notification, without
+            // a separate bridge round-trip.
+            put("pausedAll", WidgetContract.isPausedAll(this@SensorForegroundService))
+            put(
+                "paused",
+                org.json.JSONArray(WidgetContract.pausedSlots(this@SensorForegroundService))
+            )
         }
         try {
             listener?.invoke(forJs.toString())

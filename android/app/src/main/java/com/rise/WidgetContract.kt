@@ -44,6 +44,13 @@ object WidgetContract {
     /** Written by JS. Config the service needs (sunset window, noise threshold...). */
     const val KEY_SENSOR_CONFIG = "sensorConfig"
 
+    /**
+     * Which sensors the user has switched off. Written by BOTH sides: JS when
+     * toggled in the app, native when toggled from a widget or the notification.
+     * Last write wins, which is right here because both are direct user intent.
+     */
+    const val KEY_TRACKING_STATE = "trackingState"
+
     // -- Native-private runtime state -------------------------------------
     // Only SensorForegroundService reads or writes these. They are kept in the
     // same prefs file so a single clear() wipes everything.
@@ -179,6 +186,12 @@ object WidgetContract {
     const val CTRL_TIMER = "timer"
     const val CTRL_CONFIRM = "confirm"
     const val CTRL_SLIPPED = "slipped"
+    /**
+     * Switches this slot's sensor on or off. Not a habit mutation, so
+     * opForControl returns null for it and the renderer routes it to
+     * ACTION_SET_TRACKING instead of ACTION_WIDGET_CONTROL.
+     */
+    const val CTRL_TRACK = "track"
     const val CTRL_REFRESH = "refresh"
 
     /** Label drawn on each control button. */
@@ -190,9 +203,18 @@ object WidgetContract {
         CTRL_TIMER -> "+" + formatStep(step, displayMode)
         CTRL_CONFIRM -> "✓ HELD"
         CTRL_SLIPPED -> "✕ SLIPPED"
+        CTRL_TRACK -> trackLabel(true)
         CTRL_REFRESH -> "↻"
         else -> control.uppercase()
     }
+
+    /**
+     * The track button reads out the state it is *in*, not the action it performs,
+     * because a widget has no room for both and the state is the thing a user
+     * glances for. Tapping it flips the state.
+     */
+    @JvmStatic
+    fun trackLabel(tracking: Boolean): String = if (tracking) "◉ ON" else "◌ OFF"
 
     private fun formatStep(step: Double, displayMode: String): String = when (displayMode) {
         DISPLAY_DURATION -> "${(step / 60).toInt().coerceAtLeast(1)}M"
@@ -269,6 +291,13 @@ object WidgetContract {
 
     const val ACTION_WIDGET_UPDATE = "com.rise.WIDGET_UPDATE"
     const val ACTION_WIDGET_CONTROL = "com.rise.WIDGET_CONTROL"
+    /** Turn one slot's sensor on or off. Extras: EXTRA_SLOT, EXTRA_ENABLED, EXTRA_TOKEN. */
+    const val ACTION_SET_TRACKING = "com.rise.SET_TRACKING"
+    /** Global pause / resume, fired by the notification actions. */
+    const val ACTION_PAUSE_ALL = "com.rise.PAUSE_ALL"
+    const val ACTION_RESUME_ALL = "com.rise.RESUME_ALL"
+    /** Stop tracking, stop the service, and stay stopped until the app reopens. */
+    const val ACTION_QUIT = "com.rise.QUIT"
     const val ACTION_TOGGLE_TASK = "com.rise.TOGGLE_TASK"
     const val ACTION_TIMER_ACTION = "com.rise.TIMER_ACTION"
 
@@ -276,6 +305,8 @@ object WidgetContract {
     const val EXTRA_HABIT_ID = "extra_habit_id"
     const val EXTRA_SLOT = "extra_slot"
     const val EXTRA_AMOUNT = "extra_amount"
+    /** Boolean for ACTION_SET_TRACKING: true = collect, false = pause this slot. */
+    const val EXTRA_ENABLED = "extra_enabled"
 
     /**
      * Proves a control broadcast came from one of our own PendingIntents.
@@ -312,9 +343,115 @@ object WidgetContract {
         return supplied.isNotEmpty() && supplied == controlToken(context)
     }
 
+    // -----------------------------------------------------------------------
+    // Tracking / pause state
+    // -----------------------------------------------------------------------
+    //
+    // Mirrors the TrackingState interface in WidgetContract.ts. Pausing is
+    // indefinite on purpose: it survives restarts and reboots until the user turns
+    // tracking back on. A pause that quietly expired overnight would re-enable a
+    // microphone or a location listener somebody switched off deliberately.
+
+    const val F_PAUSED = "paused"
+    const val F_PAUSED_ALL = "pausedAll"
+    const val F_QUIT = "quit"
+
+    @JvmStatic
+    fun readTracking(context: Context): JSONObject = try {
+        JSONObject(prefs(context).getString(KEY_TRACKING_STATE, "{}") ?: "{}")
+    } catch (e: Exception) {
+        JSONObject()
+    }
+
+    private fun writeTracking(context: Context, state: JSONObject) {
+        prefs(context).edit().putString(KEY_TRACKING_STATE, state.toString()).apply()
+    }
+
+    @JvmStatic
+    fun isPausedAll(context: Context): Boolean =
+        readTracking(context).optBoolean(F_PAUSED_ALL, false)
+
+    /** True once the user chose "quit completely"; only opening the app clears it. */
+    @JvmStatic
+    fun isQuit(context: Context): Boolean =
+        readTracking(context).optBoolean(F_QUIT, false)
+
+    /** Slots switched off individually, for the service's listener bookkeeping. */
+    @JvmStatic
+    fun pausedSlots(context: Context): List<String> {
+        val arr = readTracking(context).optJSONArray(F_PAUSED) ?: return emptyList()
+        val out = ArrayList<String>(arr.length())
+        for (i in 0 until arr.length()) {
+            val s = arr.optString(i)
+            if (s.isNotEmpty()) out.add(s)
+        }
+        return out
+    }
+
+    /** True when this slot should currently be collecting. Mirrors isSlotTracking in TS. */
+    @JvmStatic
+    fun isSlotTracking(context: Context, slot: String): Boolean {
+        val state = readTracking(context)
+        if (state.optBoolean(F_QUIT, false) || state.optBoolean(F_PAUSED_ALL, false)) return false
+        val paused = state.optJSONArray(F_PAUSED) ?: return true
+        for (i in 0 until paused.length()) if (paused.optString(i) == slot) return false
+        return true
+    }
+
+    /**
+     * Switch one slot's sensor on or off, leaving the other slots alone.
+     *
+     * Enabling a slot also lifts a global pause or quit. Without that, tapping a
+     * widget's track button while everything is paused would look like it did
+     * nothing at all — the flag would flip but the sensor would stay dark.
+     */
+    @JvmStatic
+    fun setSlotTracking(context: Context, slot: String, enabled: Boolean) {
+        val state = readTracking(context)
+        val kept = JSONArray()
+        val existing = state.optJSONArray(F_PAUSED)
+        if (existing != null) {
+            for (i in 0 until existing.length()) {
+                val s = existing.optString(i)
+                if (s.isNotEmpty() && s != slot) kept.put(s)
+            }
+        }
+        if (!enabled) kept.put(slot)
+        state.put(F_PAUSED, kept)
+        if (enabled) {
+            state.put(F_PAUSED_ALL, false)
+            state.put(F_QUIT, false)
+        }
+        writeTracking(context, state)
+    }
+
+    /**
+     * Global pause / resume. Per-slot pauses are preserved, so resuming does not
+     * silently switch a sensor back on that the user had turned off on its own.
+     */
+    @JvmStatic
+    fun setPausedAll(context: Context, paused: Boolean) {
+        val state = readTracking(context)
+        state.put(F_PAUSED_ALL, paused)
+        if (!paused) state.put(F_QUIT, false)
+        writeTracking(context, state)
+    }
+
+    /**
+     * "Quit completely". Deliberately a separate flag from pausedAll rather than an
+     * extra-strong version of it: BootReceiver must be able to tell "paused" (still
+     * a running service showing a paused notification) from "quit" (no service at
+     * all, and none after a reboot either).
+     */
+    @JvmStatic
+    fun setQuit(context: Context, quit: Boolean) {
+        val state = readTracking(context)
+        state.put(F_QUIT, quit)
+        writeTracking(context, state)
+    }
+
     @JvmStatic
     fun deepLinkHabitDetail(habitId: String) = "rise://item/$habitId/habit"
-
     @JvmStatic
     fun deepLinkAddSensorHabit(templateId: String) = "rise://add-sensor-habit/$templateId"
 

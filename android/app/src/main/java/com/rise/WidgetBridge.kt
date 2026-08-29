@@ -183,14 +183,9 @@ class WidgetBridge(reactContext: ReactApplicationContext) : ReactContextBaseJava
                 appWidgetManager.notifyAppWidgetViewDataChanged(mainIds, R.id.widget_list)
             }
 
-            // 2. HabitControlWidget
-            val habitIds = appWidgetManager.getAppWidgetIds(ComponentName(context, HabitControlWidget::class.java))
-            for (id in habitIds) {
-                HabitControlWidget.updateWidget(context, appWidgetManager, id)
-            }
-            if (habitIds.isNotEmpty()) {
-                appWidgetManager.notifyAppWidgetViewDataChanged(habitIds, R.id.habit_calendar_grid)
-            }
+            // 2. Habit Matrix. It owns both halves of its redraw -- the header frame
+            //    and the row collection -- so the notify id lives in one place.
+            HabitControlWidget.refreshAll(context)
 
             // 3. TaskTimerWidget
             val timerIds = appWidgetManager.getAppWidgetIds(ComponentName(context, TaskTimerWidget::class.java))

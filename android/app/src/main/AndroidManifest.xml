@@ -28,6 +28,20 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <!--
+      Doze is the other thing that quietly stops all-day counting: batched sensor
+      deliveries stall while the phone is idle, and OEM battery managers will kill the
+      service outright. This permission is what lets Rise show the one-tap system
+      dialog at first launch instead of sending the user hunting through Settings.
+      It is a sensitive permission on Google Play: an app that asks for it must
+      genuinely need long-running background work, which continuous step, distance and
+      screen-time tracking is. There is a fallback to the Settings list in
+      SensorBridge.requestIgnoreBatteryOptimizations if a build refuses the dialog.
+    -->
+    <uses-permission
+        android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"
+        tools:ignore="BatteryLife" />
+
+    <!--
       Digital Sunset measures real evening screen time. PACKAGE_USAGE_STATS has no
       runtime dialog: declaring it is what makes Rise appear in Settings > Special
       app access > Usage access, which SensorBridge.openUsageStatsSettings opens.
@@ -182,10 +196,14 @@
               WIDGET_UPDATE, not the old TOGGLE_HABIT_WIDGET. broadcastUpdate sends
               com.rise.WIDGET_UPDATE, and setPackage still leaves it filter-matched,
               so a receiver without this action never hears a habit change: this
-              widget's refresh branch was unreachable and its heatmap only redrew on
+              widget's refresh branch was unreachable and its grid only redrew on
               the host's own schedule. The action it used to declare was never
-              constructed by anything; the toggle button uses a rise://habit-toggle
-              deep link instead.
+              constructed by anything.
+
+              com.rise.WIDGET_CONTROL is deliberately absent: the matrix's own
+              PendingIntents target this component explicitly, so the action needs no
+              filter, and declaring one would only advertise it. What actually keeps a
+              forged tap out is the token check in WidgetContract.isTrustedControl.
             -->
             <action android:name="com.rise.WIDGET_UPDATE" />
         </intent-filter>

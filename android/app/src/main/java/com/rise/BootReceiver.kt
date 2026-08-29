@@ -49,6 +49,13 @@ class BootReceiver : BroadcastReceiver() {
 
             if (!tracksSomething) return
 
+            // "Quit completely" outlives a reboot -- that is the whole difference
+            // between quitting and pausing. Only opening the app clears it.
+            if (WidgetContract.isQuit(context)) {
+                Log.i(TAG, "Tracking stays off after boot: user quit Rise")
+                return
+            }
+
             // fromBoot = true, so the service knows to leave the microphone alone
             // until the app is next opened. See SensorForegroundService.foregroundTypes.
             SensorForegroundService.start(context, configJson, true)

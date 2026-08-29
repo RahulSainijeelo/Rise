@@ -45,6 +45,14 @@ abstract class SensorWidgetProvider : AppWidgetProvider() {
                 SensorWidgetRenderer.refreshProvider(context, spec)
                 WidgetContract.broadcastUpdate(context)
             }
+            WidgetContract.ACTION_SET_TRACKING -> {
+                // Same forgery check as a control tap: another app must not be able to
+                // switch someone's step counting off.
+                if (!WidgetContract.isTrustedControl(context, intent)) return
+                SensorWidgetRenderer.handleSetTracking(context, intent, spec)
+                SensorWidgetRenderer.refreshProvider(context, spec)
+                WidgetContract.broadcastUpdate(context)
+            }
             WidgetContract.ACTION_WIDGET_UPDATE -> {
                 val mgr = AppWidgetManager.getInstance(context)
                 onUpdate(context, mgr, mgr.getAppWidgetIds(ComponentName(context, javaClass)))

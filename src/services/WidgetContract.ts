@@ -48,6 +48,14 @@ export const PREF_KEYS = {
     pendingOps: 'pendingOps',
     /** Per-habit config the native service needs (sunset window etc). Written by JS. */
     sensorConfig: 'sensorConfig',
+    /**
+     * TrackingState. Which sensors the user has switched off, whether tracking is
+     * globally paused, and whether the app was explicitly quit. Written by BOTH
+     * sides: JS when toggled in the app, native when toggled from a widget or the
+     * notification. Whoever writes it last wins, which is correct here because
+     * both are direct expressions of user intent.
+     */
+    trackingState: 'trackingState',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -80,9 +88,14 @@ export type WidgetDisplayMode =
 
 /**
  * Buttons the renderer should draw. Order is preserved left-to-right.
- * Each maps to exactly one PendingOp when tapped.
+ * Each maps to at most one PendingOp when tapped.
+ *
+ * 'track' is the odd one out: it does not mutate habit progress, it turns this
+ * slot's sensor on or off. Steps, distance and movement are measured rather than
+ * entered, so they offer 'track' *instead of* dec/inc — hand-editing a number the
+ * sensor overwrites on its next reading was never meaningful.
  */
-export const WIDGET_CONTROLS = ['dec', 'inc', 'check', 'timer', 'confirm', 'slipped', 'refresh'] as const;
+export const WIDGET_CONTROLS = ['dec', 'inc', 'check', 'timer', 'confirm', 'slipped', 'track', 'refresh'] as const;
 export type WidgetControl = (typeof WIDGET_CONTROLS)[number];
 
 export interface SensorSlotPayload {
@@ -112,6 +125,15 @@ export interface SensorSlotPayload {
     controls?: WidgetControl[];
     /** True when the native service is actively feeding this slot. */
     live?: boolean;
+    /**
+     * False when the user has switched this slot's sensor off.
+     *
+     * Distinct from `live`: `live` says the service is currently feeding this slot,
+     * `tracking` says the user wants it to. A paused slot keeps the progress it had
+     * banked — pausing is not a reset — and its sensor listener is unregistered so
+     * it costs no battery.
+     */
+    tracking?: boolean;
     /** Secondary status line, e.g. "0 UNLOCKS SINCE 22:00". */
     note?: string;
 }
@@ -191,8 +213,42 @@ export const CONTROL_OP: Record<WidgetControl, PendingOpName | null> = {
     timer: 'timerAdd',
     confirm: 'sunsetConfirm',
     slipped: 'sunsetSlipped',
+    track: null,          // flips TrackingState natively, never a habit mutation
     refresh: null,        // pure redraw, no state change
 };
+
+// ---------------------------------------------------------------------------
+// Tracking / pause state
+// ---------------------------------------------------------------------------
+
+/**
+ * Contents of PREF_KEYS.trackingState.
+ *
+ * Pausing is deliberately indefinite — it persists across restarts and reboots
+ * until the user turns tracking back on. A pause that silently expires overnight
+ * would re-enable a sensor someone switched off for privacy reasons.
+ */
+export interface TrackingState {
+    /** Slots the user switched off individually. */
+    paused: SensorSlot[];
+    /** Global pause, from the app or the notification's PAUSE action. */
+    pausedAll: boolean;
+    /**
+     * Set by "quit completely". The service stops and must NOT come back on boot;
+     * only opening the app clears this.
+     */
+    quit: boolean;
+}
+
+export const DEFAULT_TRACKING_STATE: TrackingState = {
+    paused: [],
+    pausedAll: false,
+    quit: false,
+};
+
+/** True when this slot should currently be collecting. */
+export const isSlotTracking = (state: TrackingState, slot: SensorSlot): boolean =>
+    !state.quit && !state.pausedAll && !state.paused.includes(slot);
 
 // ---------------------------------------------------------------------------
 // Intents
@@ -203,6 +259,13 @@ export const ACTIONS = {
     widgetUpdate: 'com.rise.WIDGET_UPDATE',
     /** A control button was tapped. Handled in-process, never launches the app. */
     widgetControl: 'com.rise.WIDGET_CONTROL',
+    /** Turn one slot's sensor on or off. Extras: slot, enabled. */
+    setTracking: 'com.rise.SET_TRACKING',
+    /** Global pause / resume, fired by the notification actions. */
+    pauseAll: 'com.rise.PAUSE_ALL',
+    resumeAll: 'com.rise.RESUME_ALL',
+    /** Stop tracking, stop the service, and stay stopped until the app reopens. */
+    quit: 'com.rise.QUIT',
     /** Task/timer actions that predate this contract. */
     toggleTask: 'com.rise.TOGGLE_TASK',
     timerAction: 'com.rise.TIMER_ACTION',
@@ -213,6 +276,8 @@ export const EXTRAS = {
     habitId: 'extra_habit_id',
     slot: 'extra_slot',
     amount: 'extra_amount',
+    /** Boolean for setTracking: true = collect, false = pause this slot. */
+    enabled: 'extra_enabled',
     /**
      * Native-only. Not listed above with the others because JS never sends a
      * control broadcast; the value lives in MODE_PRIVATE prefs and only leaves the

@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { StatusBar, View, NativeEventEmitter, NativeModules, Linking, AppState } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { StatusBar, View, NativeEventEmitter, NativeModules, Linking, AppState, Platform } from 'react-native';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import { useTheme } from './src/theme';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -10,43 +10,71 @@ import { SettingsService } from './src/services/SettingsService';
 import { sensorService, localDate } from './src/services/SensorService';
 import { applyPendingWidgetOps } from './src/services/WidgetOpsService';
 import { requestSensorPermissions } from './src/utils/permissions';
+import { TrackingConsentSheet, CONSENT_VERSION } from './src/components/TrackingConsentSheet';
 
 const { WidgetBridge } = NativeModules;
 const widgetEmitter = new NativeEventEmitter(WidgetBridge);
 
 const App = () => {
   const { theme, isDark } = useTheme();
-  const { activeProfile, login, activeTimer, tickTimer, pauseTimer, resumeTimer, stopTimer, toggleHabit } = useAppStore();
+  const { activeProfile, login, activeTimer, tickTimer, pauseTimer, resumeTimer, stopTimer, toggleHabit, habits } = useAppStore();
+
+  // First-launch consent. Shown once (per CONSENT_VERSION) instead of firing bare
+  // system dialogs at someone who has not yet been told what they are for.
+  const [consentVisible, setConsentVisible] = useState(false);
+  // The AppState listener is registered once with an empty dependency list, so it
+  // needs a ref rather than the state value it would otherwise capture forever.
+  const consentPendingRef = useRef(false);
+
+  const showConsent = (show: boolean) => {
+    consentPendingRef.current = show;
+    setConsentVisible(show);
+  };
+
+  /**
+   * Consent finished (or was skipped). Persist that it was seen, then do the two
+   * things it was blocking: set up notifications and start tracking with exactly
+   * the capabilities that were granted.
+   */
+  const finishConsent = async () => {
+    showConsent(false);
+    await SettingsService.updateSettings({ onboardedVersion: CONSENT_VERSION });
+    notificationService.requestPermission().then(granted => {
+      if (granted) notificationService.init();
+    });
+    await sensorService.ensureTracking(useAppStore.getState);
+  };
 
   useEffect(() => {
-    // Request notification permission on app start
-    notificationService.requestPermission().then(granted => {
-      if (granted) {
-        console.log('Notification permission granted');
-        notificationService.init();
-      } else {
-        console.log('Notification permission denied');
-      }
-    });
-
     // Auto-login to default profile
     const attemptAutoLogin = async () => {
-      if (!activeProfile) {
-        const settings = await SettingsService.getSettings();
-        if (settings.defaultProfile) {
-          await login({ id: settings.defaultProfile, name: 'User' });
+      const settings = await SettingsService.getSettings();
+      if (!activeProfile && settings.defaultProfile) {
+        await login({ id: settings.defaultProfile, name: 'User' });
+      }
+
+      const needsConsent =
+        Platform.OS === 'android' && (settings.onboardedVersion || 0) < CONSENT_VERSION;
+
+      if (needsConsent) {
+        // The sheet owns every ask, including notifications: a dialog fired from
+        // here would land on top of it and be dismissed without being read.
+        showConsent(true);
+      } else {
+        notificationService.requestPermission().then(granted => {
+          if (granted) notificationService.init();
+        });
+
+        // Permissions before tracking: the foreground service narrows what it claims
+        // to what has actually been granted, so asking after starting it would leave
+        // it running with less capability than the user agreed to.
+        const missing = await requestSensorPermissions(useAppStore.getState().habits || []);
+        if (missing.length) {
+          console.warn('Sensor habits are missing permissions:', missing.join(', '));
         }
-      }
 
-      // Permissions before tracking: the foreground service narrows what it claims
-      // to what has actually been granted, so asking after starting it would leave
-      // it running with less capability than the user agreed to.
-      const missing = await requestSensorPermissions(useAppStore.getState().habits || []);
-      if (missing.length) {
-        console.warn('Sensor habits are missing permissions:', missing.join(', '));
+        await sensorService.ensureTracking(useAppStore.getState);
       }
-
-      await sensorService.ensureTracking(useAppStore.getState);
 
       // Anything tapped on a widget while the app was closed.
       await applyPendingWidgetOps(useAppStore.getState);
@@ -61,7 +89,9 @@ const App = () => {
     const appStateSub = AppState.addEventListener('change', (next) => {
       if (next !== 'active') return;
       applyPendingWidgetOps(useAppStore.getState);
-      sensorService.ensureTracking(useAppStore.getState);
+      // Not while the consent sheet is still up: starting the service here would
+      // raise its notification behind a screen that is still asking permission for it.
+      if (!consentPendingRef.current) sensorService.ensureTracking(useAppStore.getState);
     });
 
     // Keep the native service's config in step with the habits themselves, so
@@ -175,6 +205,11 @@ const App = () => {
             backgroundColor={theme.colors.background}
           />
           <AppNavigator />
+          <TrackingConsentSheet
+            visible={consentVisible}
+            habits={habits}
+            onDone={finishConsent}
+          />
         </View>
       </SafeAreaProvider>
     </GestureHandlerRootView>

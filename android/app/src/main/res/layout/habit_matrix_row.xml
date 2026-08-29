@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  One habit's week in the Habit Matrix.
+
+  Seven fixed columns, because RemoteViews cannot add views at runtime: six days of
+  history plus today. Today sits in its own FrameLayout so the tap target is bigger
+  than the dot it contains and so it is the only clickable cell in the row — a whole
+  row that toggled would mark habits done while somebody was scrolling.
+
+  Every dot is a bare View coloured with setInt(id, "setBackgroundColor", …), which
+  is one of the few background calls that is actually @RemotableViewMethod. The
+  colours below are only placeholders for the layout preview; the provider sets all
+  of them on every draw.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:minHeight="24dp"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:paddingTop="2dp"
+    android:paddingBottom="2dp">
+
+    <TextView
+        android:id="@+id/matrix_name"
+        android:layout_width="0dp"
+        android:layout_weight="1"
+        android:layout_height="wrap_content"
+        android:singleLine="true"
+        android:ellipsize="end"
+        android:text="HABIT"
+        android:textColor="#BBBBBB"
+        android:textSize="10sp"
+        android:textStyle="bold" />
+
+    <View
+        android:id="@+id/matrix_d0"
+        android:layout_width="8dp"
+        android:layout_height="8dp"
+        android:layout_marginStart="3dp"
+        android:background="#2E2E2E" />
+
+    <View
+        android:id="@+id/matrix_d1"
+        android:layout_width="8dp"
+        android:layout_height="8dp"
+        android:layout_marginStart="3dp"
+        android:background="#2E2E2E" />
+
+    <View
+        android:id="@+id/matrix_d2"
+        android:layout_width="8dp"
+        android:layout_height="8dp"
+        android:layout_marginStart="3dp"
+        android:background="#2E2E2E" />
+
+    <View
+        android:id="@+id/matrix_d3"
+        android:layout_width="8dp"
+        android:layout_height="8dp"
+        android:layout_marginStart="3dp"
+        android:background="#2E2E2E" />
+
+    <View
+        android:id="@+id/matrix_d4"
+        android:layout_width="8dp"
+        android:layout_height="8dp"
+        android:layout_marginStart="3dp"
+        android:background="#2E2E2E" />
+
+    <View
+        android:id="@+id/matrix_d5"
+        android:layout_width="8dp"
+        android:layout_height="8dp"
+        android:layout_marginStart="3dp"
+        android:background="#2E2E2E" />
+
+    <!-- Today. The cell is the tap target, the dot inside it is the state. -->
+    <FrameLayout
+        android:id="@+id/matrix_today_cell"
+        android:layout_width="20dp"
+        android:layout_height="20dp"
+        android:layout_marginStart="3dp">
+
+        <View
+            android:id="@+id/matrix_today"
+            android:layout_width="12dp"
+            android:layout_height="12dp"
+            android:layout_gravity="center"
+            android:background="#D71921" />
+    </FrameLayout>
+
+    <TextView
+        android:id="@+id/matrix_streak"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:minWidth="16dp"
+        android:layout_marginStart="6dp"
+        android:gravity="end"
+        android:text="0"
+        android:textColor="#888888"
+        android:textSize="9sp" />
+
+</LinearLayout>

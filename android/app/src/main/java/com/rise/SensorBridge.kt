@@ -3,6 +3,8 @@ package com.rise
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
 import com.facebook.react.bridge.Promise
@@ -128,6 +130,122 @@ class SensorBridge(private val reactContext: ReactApplicationContext) :
                 )
             } catch (e2: Exception) {
                 Log.w(TAG, "No usage access settings screen on this device", e2)
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Tracking / pause
+    // -----------------------------------------------------------------------
+    //
+    // Pause state lives in native prefs and nowhere else. A widget tap, a
+    // notification action and the habit screen all write the same bag, so keeping a
+    // second copy in the JS store would guarantee the two disagree the moment
+    // someone pauses a sensor while the app is closed.
+
+    /** The raw TrackingState JSON: { paused: string[], pausedAll, quit }. */
+    @ReactMethod
+    fun getTrackingState(promise: Promise) {
+        try {
+            promise.resolve(WidgetContract.readTracking(reactContext).toString())
+        } catch (e: Exception) {
+            promise.resolve("{}")
+        }
+    }
+
+    /** Switch one sensor on or off. `slot` is a SENSOR_SLOTS value. */
+    @ReactMethod
+    fun setSlotTracking(slot: String, enabled: Boolean) {
+        WidgetContract.setSlotTracking(reactContext, slot, enabled)
+        applyTrackingChange(enabled)
+    }
+
+    @ReactMethod
+    fun setPausedAll(paused: Boolean) {
+        WidgetContract.setPausedAll(reactContext, paused)
+        applyTrackingChange(!paused)
+    }
+
+    /**
+     * Quit completely: release every sensor, drop the notification, and stay stopped
+     * across reboots. Opening the app is what undoes it, which is why this does not
+     * need an "unquit" counterpart.
+     */
+    @ReactMethod
+    fun quitTracking() {
+        WidgetContract.setQuit(reactContext, true)
+        SensorForegroundService.stop(reactContext)
+        refreshWidgets()
+    }
+
+    /**
+     * The flag by itself changes nothing: the service is what holds the sensors, so
+     * it has to re-read the state and register or unregister accordingly.
+     */
+    private fun applyTrackingChange(enabled: Boolean) {
+        try {
+            if (enabled) {
+                SensorForegroundService.start(
+                    reactContext,
+                    WidgetContract.prefs(reactContext)
+                        .getString(WidgetContract.KEY_SENSOR_CONFIG, "{}")
+                )
+            } else if (SensorForegroundService.isRunning(reactContext)) {
+                // Only poke a service that exists; starting one to tell it to stop
+                // collecting would raise a notification for nothing.
+                reactContext.startService(
+                    Intent(reactContext, SensorForegroundService::class.java)
+                        .setAction(WidgetContract.SERVICE_ACTION_REFRESH)
+                )
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not apply tracking change", e)
+        }
+        refreshWidgets()
+    }
+
+    // -----------------------------------------------------------------------
+    // Battery optimisation
+    // -----------------------------------------------------------------------
+
+    @ReactMethod
+    fun isIgnoringBatteryOptimizations(promise: Promise) {
+        promise.resolve(
+            try {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) true
+                else (reactContext.getSystemService(Context.POWER_SERVICE) as? PowerManager)
+                    ?.isIgnoringBatteryOptimizations(reactContext.packageName) ?: false
+            } catch (e: Exception) {
+                false
+            }
+        )
+    }
+
+    /**
+     * Ask for the exemption with the system dialog rather than dropping the user on a
+     * Settings list to hunt for Rise. Doze is what silently kills all-day step
+     * counting, so this is worth one prompt at first launch.
+     *
+     * Falls back to the list if the dialog is unavailable: the direct action needs
+     * REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, which some builds refuse outright.
+     */
+    @ReactMethod
+    fun requestIgnoreBatteryOptimizations() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        try {
+            reactContext.startActivity(
+                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                    .setData(Uri.parse("package:${reactContext.packageName}"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        } catch (e: Exception) {
+            try {
+                reactContext.startActivity(
+                    Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            } catch (e2: Exception) {
+                Log.w(TAG, "No battery optimisation screen on this device", e2)
             }
         }
     }

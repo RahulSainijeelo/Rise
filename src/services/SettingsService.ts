@@ -8,6 +8,12 @@ const BASE_PATH = `${RNFS.DocumentDirectoryPath}/${APP_FOLDER_NAME}`;
 export interface AppSettings {
     defaultProfile?: string;
     themeMode?: 'system' | 'light' | 'dark';
+    /**
+     * Which version of the first-launch tracking consent this user has seen.
+     * Compared against CONSENT_VERSION in TrackingConsentSheet, so adding a new
+     * capability can re-show the sheet without nagging everyone every launch.
+     */
+    onboardedVersion?: number;
 }
 
 export class SettingsService {

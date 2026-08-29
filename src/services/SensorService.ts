@@ -58,6 +58,23 @@ export interface LiveSensorData {
     sunsetWindowOpen: boolean;
     /** True when a native foreground service is feeding these numbers. */
     live: boolean;
+    /**
+     * Tracking state, mirrored out of native prefs on every service tick.
+     *
+     * This is a read-only view: the authoritative copy lives in
+     * RiseWidgetPrefs["trackingState"], because a widget tap or a notification
+     * action can pause a sensor while JS is not running at all. Screens render
+     * from here and write through setSlotTracking, never the other way round.
+     */
+    pausedAll: boolean;
+    paused: SensorSlot[];
+}
+
+/** Everything the app needs to know about what is and is not being measured. */
+export interface TrackingSnapshot {
+    paused: SensorSlot[];
+    pausedAll: boolean;
+    quit: boolean;
 }
 
 const EMPTY_LIVE: LiveSensorData = {
@@ -73,6 +90,8 @@ const EMPTY_LIVE: LiveSensorData = {
     sunsetDate: '',
     sunsetWindowOpen: false,
     live: false,
+    pausedAll: false,
+    paused: [],
 };
 
 /**
@@ -259,6 +278,8 @@ class SensorService {
             sunsetDate: data.sunsetDate ?? this.live.sunsetDate,
             sunsetWindowOpen: data.sunsetWindowOpen ?? this.live.sunsetWindowOpen,
             live: true,
+            pausedAll: !!data.pausedAll,
+            paused: Array.isArray(data.paused) ? data.paused : [],
         });
 
         this.commitToStore();
@@ -413,6 +434,141 @@ class SensorService {
         if (!hasNativeService) return;
         try {
             SensorBridge.openUsageStatsSettings();
+        } catch (e) { }
+    }
+
+    // -----------------------------------------------------------------------
+    // Tracking / pause
+    // -----------------------------------------------------------------------
+    //
+    // There is intentionally no JS copy of the pause state. The same bag is
+    // written by the habit screen, by a widget button and by the notification's
+    // PAUSE action, and the last two happen with JS dead, so a cached copy here
+    // would be wrong exactly when it mattered. Reads go to native; writes go to
+    // native and come back on the next tick through LiveSensorData.
+
+    async getTrackingState(): Promise<TrackingSnapshot> {
+        const fallback: TrackingSnapshot = { paused: [], pausedAll: false, quit: false };
+        if (!hasNativeService) return fallback;
+        try {
+            const parsed = JSON.parse((await SensorBridge.getTrackingState()) || '{}');
+            const state: TrackingSnapshot = {
+                paused: Array.isArray(parsed.paused) ? parsed.paused : [],
+                pausedAll: !!parsed.pausedAll,
+                quit: !!parsed.quit,
+            };
+            // Fold it into the live snapshot too: a widget or notification pause
+            // happened outside JS, and waiting for the next service tick would leave
+            // a just-resumed screen drawing a stale OFF button.
+            this.emit({ paused: state.paused, pausedAll: state.pausedAll || state.quit });
+            return state;
+        } catch (e) {
+            return fallback;
+        }
+    }
+
+    /**
+     * Synchronous answer for render: is this slot being measured right now?
+     * Uses the last tick, so it is correct the instant a screen paints and is
+     * corrected within one publish cycle if it ever lags.
+     */
+    isSlotTracking(slot: SensorSlot): boolean {
+        if (!hasNativeService) return true;
+        return !this.live.pausedAll && !this.live.paused.includes(slot);
+    }
+
+    /** Switch one sensor off (or back on). Releases the hardware natively. */
+    async setSlotTracking(slot: SensorSlot, enabled: boolean) {
+        // Paint immediately; the service confirms on its next publish.
+        const paused = this.live.paused.filter(s => s !== slot);
+        this.emit({
+            paused: enabled ? paused : [...paused, slot],
+            pausedAll: enabled ? false : this.live.pausedAll,
+        });
+        if (!hasNativeService) return;
+        try {
+            SensorBridge.setSlotTracking(slot, enabled);
+        } catch (e) {
+            console.warn('Could not change sensor tracking', e);
+        }
+    }
+
+    /** Pause or resume every sensor at once, as the notification does. */
+    async setPausedAll(paused: boolean) {
+        this.emit({ pausedAll: paused });
+        if (!hasNativeService) return;
+        try {
+            SensorBridge.setPausedAll(paused);
+        } catch (e) {
+            console.warn('Could not change global tracking', e);
+        }
+    }
+
+    /**
+     * Stop everything and stay stopped across reboots. Opening the app clears the
+     * flag, so this is a quit rather than an uninstall.
+     */
+    quitTracking() {
+        this.tracking = false;
+        this.configJson = '';
+        this.stopNoiseAccrual();
+        this.stopPedometer();
+        this.stopLocationTracking();
+        this.stopNoiseSensor();
+        this.emit({ live: false, pausedAll: true });
+        if (!hasNativeService) return;
+        try {
+            SensorBridge.quitTracking();
+        } catch (e) { }
+    }
+
+    // -----------------------------------------------------------------------
+    // Battery optimisation
+    // -----------------------------------------------------------------------
+
+    /**
+     * Doze is what quietly ends all-day counting: sensor batches stall while the
+     * phone is idle and OEM battery managers kill the service outright. Reported as
+     * already-granted where the concept does not exist, so callers can treat false
+     * as "worth asking".
+     */
+    async isIgnoringBatteryOptimizations(): Promise<boolean> {
+        if (!hasNativeService) return true;
+        try {
+            return await SensorBridge.isIgnoringBatteryOptimizations();
+        } catch (e) {
+            return true;
+        }
+    }
+
+    requestIgnoreBatteryOptimizations() {
+        if (!hasNativeService) return;
+        try {
+            SensorBridge.requestIgnoreBatteryOptimizations();
+        } catch (e) { }
+    }
+
+    /**
+     * Pull the service's last published readings without waiting for a tick, so a
+     * habit screen shows the real step count the moment it opens instead of zeros.
+     */
+    async loadRuntimeSnapshot(): Promise<void> {
+        if (!hasNativeService) return;
+        try {
+            const raw = await SensorBridge.getRuntimeSnapshot();
+            const data = JSON.parse(raw || '{}');
+            if (!data || typeof data !== 'object') return;
+            this.emit({
+                steps: data.steps ?? this.live.steps,
+                noise: data.noise ?? this.live.noise,
+                noiseSeconds: data.noiseSeconds ?? this.live.noiseSeconds,
+                distanceMeters: data.distanceMeters ?? this.live.distanceMeters,
+                sunsetMinutes: data.sunsetMinutes ?? this.live.sunsetMinutes,
+                sunsetUnlocks: data.sunsetUnlocks ?? this.live.sunsetUnlocks,
+                sunsetSource: data.sunsetSource ?? this.live.sunsetSource,
+                sunsetDate: data.sunsetDate ?? this.live.sunsetDate,
+                sunsetWindowOpen: data.sunsetWindowOpen ?? this.live.sunsetWindowOpen,
+            });
         } catch (e) { }
     }
 

@@ -6,6 +6,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.util.Log
 import android.view.View
 import android.widget.RemoteViews
@@ -247,6 +248,10 @@ object SensorWidgetRenderer {
         val direction = slot.optString(WidgetContract.F_GOAL_DIRECTION, WidgetContract.DIR_AT_LEAST)
         val completed = slot.optBoolean(WidgetContract.F_IS_COMPLETED, false)
         val live = slot.optBoolean(WidgetContract.F_LIVE, false)
+        // Read pause state from the tracking prefs, not from the payload: the user may
+        // have paused this sensor from a widget or the notification since JS last
+        // wrote, and native is the side that knows.
+        val tracking = WidgetContract.isSlotTracking(context, spec.slot)
 
         views.setTextViewText(R.id.habit_title, title.uppercase())
         views.setTextViewText(R.id.sensor_value, WidgetContract.formatValue(progress, displayMode))
@@ -271,8 +276,11 @@ object SensorWidgetRenderer {
         // Secondary line. The live marker is the only visible proof that the
         // foreground service is feeding this widget, which is what makes the
         // home screen match the in-app habit page instead of lagging behind it.
+        // A paused sensor says so instead: the number below it is frozen, not wrong,
+        // and without this line a stalled count looks like a bug.
         val note = slot.optString(WidgetContract.F_NOTE, "")
         val noteText = when {
+            !tracking -> "◌ SENSOR OFF · TAP TO RESUME"
             live && note.isNotEmpty() -> "● $note"
             live -> "● LIVE"
             else -> note
@@ -282,7 +290,7 @@ object SensorWidgetRenderer {
         } else {
             views.setViewVisibility(R.id.habit_note, View.VISIBLE)
             views.setTextViewText(R.id.habit_note, noteText)
-            views.setTextColor(R.id.habit_note, if (live) COLOR_ACCENT else COLOR_MUTED)
+            views.setTextColor(R.id.habit_note, if (live && tracking) COLOR_ACCENT else COLOR_MUTED)
         }
 
         applySequence(views, if (completed) "complete" else spec.idleSequence)
@@ -297,13 +305,16 @@ object SensorWidgetRenderer {
         views.setOnClickPendingIntent(R.id.habit_content, detailPi)
         views.setOnClickPendingIntent(R.id.habit_title, detailPi)
 
-        renderControls(context, views, appWidgetId, spec, slot, step, displayMode, completed, habitId)
+        renderControls(
+            context, views, appWidgetId, spec, slot, step, displayMode, completed, habitId, tracking
+        )
     }
 
     /**
      * Draws the same control set the in-app habit page offers for this habit type:
      * minus/plus for numeric habits, a timer bump plus a done toggle for timed
-     * ones, held/slipped for a habit whose goal is a limit, and a refresh on any
+     * ones, held/slipped for a habit whose goal is a limit, a sensor on/off switch
+     * for the habits that are measured rather than entered, and a refresh on any
      * habit with room for it so a sensor reading can be pulled on demand.
      */
     private fun renderControls(
@@ -315,7 +326,8 @@ object SensorWidgetRenderer {
         step: Double,
         displayMode: String,
         completed: Boolean,
-        habitId: String
+        habitId: String,
+        tracking: Boolean
     ) {
         val controls = WidgetContract.controlsOf(slot).toMutableList()
         if (controls.isEmpty()) controls.add(WidgetContract.CTRL_CHECK)
@@ -330,18 +342,29 @@ object SensorWidgetRenderer {
             }
 
             views.setViewVisibility(viewId, View.VISIBLE)
-            views.setTextViewText(viewId, labelFor(control, step, displayMode, completed))
-            views.setTextColor(viewId, controlColor(control, completed))
+            views.setTextViewText(viewId, labelFor(control, step, displayMode, completed, tracking))
+            views.setTextColor(viewId, controlColor(control, completed, tracking))
 
             val op = WidgetContract.opForControl(control)
+            val isTrack = control == WidgetContract.CTRL_TRACK
             val intent = Intent(context, spec.provider).apply {
-                action = WidgetContract.ACTION_WIDGET_CONTROL
+                // The track button is not a habit mutation, so it travels under its
+                // own action and is handled without touching progress or the op queue.
+                action =
+                    if (isTrack) WidgetContract.ACTION_SET_TRACKING
+                    else WidgetContract.ACTION_WIDGET_CONTROL
                 // Distinguishes this PendingIntent from its siblings; extras alone
-                // do not, because filterEquals ignores them.
-                data = Uri.parse("rise://widget/$appWidgetId/${spec.slot}/$control")
+                // do not, because filterEquals ignores them. The target state is part
+                // of the track button's Uri so the intent stays idempotent: a stale
+                // RemoteViews can only re-assert a state, never flip the current one.
+                data = Uri.parse(
+                    if (isTrack) "rise://widget/$appWidgetId/${spec.slot}/track/${if (tracking) 0 else 1}"
+                    else "rise://widget/$appWidgetId/${spec.slot}/$control"
+                )
                 putExtra(WidgetContract.EXTRA_SLOT, spec.slot)
                 putExtra(WidgetContract.EXTRA_HABIT_ID, habitId)
                 putExtra(WidgetContract.EXTRA_AMOUNT, amountFor(control, step))
+                if (isTrack) putExtra(WidgetContract.EXTRA_ENABLED, !tracking)
                 if (op != null) putExtra(WidgetContract.EXTRA_OP, op)
                 // Marks the broadcast as ours; see WidgetContract.EXTRA_TOKEN for
                 // why an unexported-looking action is not protection on its own.
@@ -514,6 +537,50 @@ object SensorWidgetRenderer {
         }
     }
 
+    /**
+     * Switch this slot's sensor on or off from a widget tap.
+     *
+     * The intent carries the *target* state rather than "toggle", so two taps that
+     * race, or a stale RemoteViews the host held onto, can only ever re-assert what
+     * the user asked for.
+     */
+    @JvmStatic
+    fun handleSetTracking(context: Context, intent: Intent, spec: SlotSpec) {
+        val slotName = intent.getStringExtra(WidgetContract.EXTRA_SLOT) ?: spec.slot
+        val enabled = intent.getBooleanExtra(WidgetContract.EXTRA_ENABLED, true)
+        WidgetContract.setSlotTracking(context, slotName, enabled)
+
+        // The flag alone changes nothing: the service is what holds the sensor open,
+        // so it has to re-read the state and unregister (or re-register) its
+        // listeners. Without this a "pause" would only hide the number.
+        try {
+            val serviceIntent = Intent(context, SensorForegroundService::class.java)
+                .setAction(
+                    if (enabled) WidgetContract.SERVICE_ACTION_START
+                    else WidgetContract.SERVICE_ACTION_REFRESH
+                )
+            if (enabled) {
+                // Acting on a widget is an explicit user action, which is one of the
+                // exemptions that still permits a foreground-service start from the
+                // background -- so switching a sensor back on can start the service.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(serviceIntent)
+                } else {
+                    context.startService(serviceIntent)
+                }
+            } else if (SensorForegroundService.isRunning(context)) {
+                // Only poke a service that exists. Starting one just to tell it to
+                // stop collecting would put up a notification for a sensor the user
+                // has just switched off.
+                context.startService(serviceIntent)
+            }
+        } catch (e: Exception) {
+            // Nothing to recover here: the flag is saved either way, and the service
+            // re-reads it the next time it starts.
+            Log.w(TAG, "Could not hand tracking change to the service", e)
+        }
+    }
+
     private fun requestServiceRefresh(context: Context) {
         try {
             context.startService(
@@ -557,19 +624,25 @@ object SensorWidgetRenderer {
         control: String,
         step: Double,
         displayMode: String,
-        completed: Boolean
+        completed: Boolean,
+        tracking: Boolean
     ): String = when {
         // The shared label helper cannot know the habit is already done, and a
         // button reading "✓ DONE" on a finished habit gives no hint that it undoes.
         control == WidgetContract.CTRL_CHECK && completed -> "✕ UNDO"
+        control == WidgetContract.CTRL_TRACK -> WidgetContract.trackLabel(tracking)
         else -> WidgetContract.controlLabel(control, step, displayMode)
     }
 
-    private fun controlColor(control: String, completed: Boolean): Int = when {
+    private fun controlColor(control: String, completed: Boolean, tracking: Boolean): Int = when {
         control == WidgetContract.CTRL_CONFIRM -> COLOR_DONE
         control == WidgetContract.CTRL_SLIPPED -> COLOR_ACCENT
         control == WidgetContract.CTRL_CHECK && completed -> COLOR_MUTED
         control == WidgetContract.CTRL_REFRESH -> COLOR_MUTED
+        // Green while collecting, red once off: the button is a status light as much
+        // as a switch, and this is the one control whose state is not visible from
+        // the number above it.
+        control == WidgetContract.CTRL_TRACK -> if (tracking) COLOR_DONE else COLOR_ACCENT
         else -> COLOR_TEXT
     }
 

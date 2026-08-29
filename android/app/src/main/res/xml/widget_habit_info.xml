@@ -1,8 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Sizing for the Habit Matrix.
+
+  minWidth is 180dp because a row is a name plus seven columns plus a streak: any
+  narrower and the habit names ellipsize to nothing. minHeight fits the header and
+  about three rows; the list scrolls past that, and resizing gives it more.
+-->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:initialLayout="@layout/habit_control_widget"
-    android:minWidth="110dp"
+    android:minWidth="180dp"
     android:minHeight="110dp"
+    android:minResizeWidth="180dp"
+    android:minResizeHeight="110dp"
     android:updatePeriodMillis="86400000"
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen"

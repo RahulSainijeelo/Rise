@@ -2,14 +2,18 @@ import { GlobalHeader } from '../components/GlobalHeader';
 import { HomeScreen } from '../screens/HomeScreen';
 import { TasksScreen } from '../screens/TasksScreen';
 import { HabitsScreen } from '../screens/HabitsScreen';
+import FocusScreen from '../screens/FocusScreen';
 import { View, Platform, Image, StyleSheet } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { Timer } from 'lucide-react-native';
 import { useTheme } from '../theme';
 
 // Import the PNG icons
 const HomeIcon = require('../assets/tabs/home_tracker_1.png');
 const TasksIcon = require('../assets/tabs/todo_tracker.png');
 const HabitsIcon = require('../assets/tabs/todo_habit.png');
+// Focus has no dot-matrix PNG of its own, so it borrows a vector icon rather than
+// shipping a mismatched raster one.
 
 const Tab = createBottomTabNavigator();
 
@@ -75,6 +79,19 @@ export const TabNavigator = ({ navigation }: any) => {
                                 source={HabitsIcon}
                                 style={[styles.tabIconSmall, { opacity: focused ? 1 : 0.7, tintColor: getIconTint(focused) }]}
                                 resizeMode="contain"
+                            />
+                        ),
+                    }}
+                />
+                <Tab.Screen
+                    name="Focus"
+                    component={FocusScreen}
+                    options={{
+                        tabBarIcon: ({ focused }) => (
+                            <Timer
+                                size={26}
+                                color={getIconTint(focused)}
+                                opacity={focused ? 1 : 0.7}
                             />
                         ),
                     }}

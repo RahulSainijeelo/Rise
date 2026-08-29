@@ -51,6 +51,21 @@ object WidgetContract {
      */
     const val KEY_TRACKING_STATE = "trackingState"
 
+    // -- Focus timer ------------------------------------------------------
+    // The Focus Timer is deliberately not a habit: no goal, no streak, no day. It is
+    // one countdown shared by the widget and the app tab, so its state lives here
+    // rather than in either half — a widget tap has to work with JS dead, and the app
+    // tab has to show the run the widget started.
+
+    /** The single focus countdown. Fields are the FOCUS_F_* names below. */
+    const val KEY_FOCUS_STATE = "focusState"
+
+    /** Finished and abandoned runs, newest first, capped at FOCUS_HISTORY_MAX. */
+    const val KEY_FOCUS_HISTORY = "focusHistory"
+
+    /** The ring palette picked in the app tab; the widget ring uses the same one. */
+    const val KEY_FOCUS_THEME = "focusTheme"
+
     // -- Native-private runtime state -------------------------------------
     // Only SensorForegroundService reads or writes these. They are kept in the
     // same prefs file so a single clear() wipes everything.
@@ -301,12 +316,25 @@ object WidgetContract {
     const val ACTION_TOGGLE_TASK = "com.rise.TOGGLE_TASK"
     const val ACTION_TIMER_ACTION = "com.rise.TIMER_ACTION"
 
+    /**
+     * A Focus Timer button was tapped. Extras: EXTRA_FOCUS_OP, EXTRA_TOKEN.
+     *
+     * Every one of these is handled inside the receiver — none of them opens the app.
+     * That is the whole point of the rebuilt timer: the old one routed PAUSE and STOP
+     * through an activity, so a countdown on the home screen could not be paused
+     * without launching Rise.
+     */
+    const val ACTION_FOCUS_CONTROL = "com.rise.FOCUS_CONTROL"
+
     const val EXTRA_OP = "extra_op"
     const val EXTRA_HABIT_ID = "extra_habit_id"
     const val EXTRA_SLOT = "extra_slot"
     const val EXTRA_AMOUNT = "extra_amount"
     /** Boolean for ACTION_SET_TRACKING: true = collect, false = pause this slot. */
     const val EXTRA_ENABLED = "extra_enabled"
+
+    /** One of the FOCUS_OP_* values, for ACTION_FOCUS_CONTROL. */
+    const val EXTRA_FOCUS_OP = "extra_focus_op"
 
     /**
      * Proves a control broadcast came from one of our own PendingIntents.
@@ -470,6 +498,92 @@ object WidgetContract {
     const val SERVICE_ACTION_REFRESH = "com.rise.sensor.REFRESH"
     const val SERVICE_CHANNEL_ID = "rise_sensors"
     const val SERVICE_NOTIFICATION_ID = 4711
+
+    // -----------------------------------------------------------------------
+    // Focus timer
+    // -----------------------------------------------------------------------
+    //
+    // Mirrors FocusState / FocusRun / FocusTheme in src/services/FocusTimer.ts.
+    // The state machine itself lives in FocusTimer.kt; only the vocabulary is here,
+    // because both halves and three files have to agree on it.
+
+    const val FOCUS_MODE_IDLE = "idle"
+    const val FOCUS_MODE_RUNNING = "running"
+    const val FOCUS_MODE_PAUSED = "paused"
+
+    /** Which of the two setup fields the up/down buttons currently act on. */
+    const val FOCUS_FIELD_H = "h"
+    const val FOCUS_FIELD_M = "m"
+
+    // State fields.
+    const val FOCUS_F_MODE = "mode"
+    const val FOCUS_F_SETUP_H = "setupH"
+    const val FOCUS_F_SETUP_M = "setupM"
+    const val FOCUS_F_FIELD = "field"
+    const val FOCUS_F_DURATION = "durationMs"
+    /** Wall-clock millis the run ends at. Authoritative while running. */
+    const val FOCUS_F_ENDS_AT = "endsAt"
+    /** Millis left. Authoritative only while paused. */
+    const val FOCUS_F_REMAINING = "remainingMs"
+    const val FOCUS_F_STARTED_AT = "startedAt"
+    const val FOCUS_F_SOURCE = "source"
+
+    // History fields.
+    const val FOCUS_H_ID = "id"
+    const val FOCUS_H_STARTED_AT = "startedAt"
+    const val FOCUS_H_ENDED_AT = "endedAt"
+    const val FOCUS_H_PLANNED = "plannedMs"
+    const val FOCUS_H_ACTUAL = "actualMs"
+    const val FOCUS_H_COMPLETED = "completed"
+    const val FOCUS_H_SOURCE = "source"
+
+    // Theme fields. from/to/track are #RRGGBB strings.
+    const val FOCUS_T_ID = "id"
+    const val FOCUS_T_FROM = "from"
+    const val FOCUS_T_TO = "to"
+    const val FOCUS_T_TRACK = "track"
+
+    // Ops. The widget's buttons and the bridge both speak these.
+    const val FOCUS_OP_SELECT_H = "selectH"
+    const val FOCUS_OP_SELECT_M = "selectM"
+    const val FOCUS_OP_UP = "up"
+    const val FOCUS_OP_DOWN = "down"
+    const val FOCUS_OP_START = "start"
+    const val FOCUS_OP_PAUSE = "pause"
+    const val FOCUS_OP_RESUME = "resume"
+    /** Back to the setup face. Records the run as not completed if one was going. */
+    const val FOCUS_OP_RESET = "reset"
+    /** Fired by the safety-net alarm: settle a run whose deadline has passed. */
+    const val FOCUS_OP_EXPIRE = "expire"
+
+    /** Who started the run, for the history list. */
+    const val FOCUS_SOURCE_WIDGET = "widget"
+    const val FOCUS_SOURCE_APP = "app"
+
+    const val FOCUS_HISTORY_MAX = 100
+
+    /** A run has to be at least this long to be worth recording. */
+    const val FOCUS_MIN_MS = 60_000L
+
+    const val FOCUS_CHANNEL_ID = "rise_focus"
+    const val FOCUS_DONE_CHANNEL_ID = "rise_focus_done"
+    const val FOCUS_NOTIFICATION_ID = 4712
+    const val FOCUS_DONE_NOTIFICATION_ID = 4713
+
+    const val FOCUS_SERVICE_ACTION_SYNC = "com.rise.focus.SYNC"
+    const val FOCUS_SERVICE_ACTION_STOP = "com.rise.focus.STOP"
+
+    /**
+     * The Focus tab. `home/` is not decoration: React Navigation concatenates nested
+     * paths, and Focus is a tab inside the Main stack screen whose path is `home`, so
+     * `rise://focus` matches nothing and lands the user on the default tab.
+     */
+    @JvmStatic
+    fun deepLinkFocus() = "rise://home/focus"
+
+    /** "01:25" — always two places per field, which is what the setup face promises. */
+    @JvmStatic
+    fun focusPad(value: Int): String = String.format(java.util.Locale.US, "%02d", value)
 
     // -----------------------------------------------------------------------
     // Digital Sunset defaults

@@ -25,6 +25,8 @@ const linking = {
                     Home: 'root',
                     Tasks: 'tasks',
                     Habits: 'habits',
+                    // Nested paths concatenate, so the widget must open rise://home/focus.
+                    Focus: 'focus',
                 }
             },
             HabitDetail: 'item/:habitId/habit',

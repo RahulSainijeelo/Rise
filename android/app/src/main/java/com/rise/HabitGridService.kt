@@ -305,12 +305,15 @@ class HabitMatrixFactory(private val context: Context) : RemoteViewsService.Remo
     override fun getLoadingView(): RemoteViews? = null
     override fun getViewTypeCount(): Int = 1
 
-    // Keyed by habit, not by position, so reordering (or pinning) redraws the right
-    // rows instead of shuffling names between them.
-    override fun getItemId(position: Int): Long =
-        rows.getOrNull(position)?.id?.hashCode()?.toLong() ?: position.toLong()
+    /*
+     * Position-keyed, unstable ids, exactly like RiseWidgetService — the one collection
+     * widget in this app with a long history of working. Hashing the habit id and
+     * claiming stable ids reads better but hands RemoteViewsAdapter a cache key it did
+     * not have before, and the rows here are cheap enough that there is nothing to win.
+     */
+    override fun getItemId(position: Int): Long = position.toLong()
 
-    override fun hasStableIds(): Boolean = true
+    override fun hasStableIds(): Boolean = false
 
     private companion object {
         const val TAG = "HabitMatrixFactory"

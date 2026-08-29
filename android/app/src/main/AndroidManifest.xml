@@ -24,6 +24,13 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!--
+      The Focus Timer's service. There is no foreground-service type for a countdown:
+      health/location/microphone would all be lies, and dataSync is capped at six hours
+      a day from Android 15, which a long session could reach. specialUse is the
+      documented answer, and it is declared with a subtype property on the service.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
@@ -229,6 +236,20 @@
         android:name="com.rise.SensorForegroundService"
         android:exported="false"
         android:foregroundServiceType="health|location|microphone|dataSync" />
+
+      <!--
+        Rings the Focus Timer on time and moves its ring while the screen is on. Not
+        the timer itself: the state is a deadline in SharedPreferences, so the widget
+        and the app tab stay correct with this service dead.
+      -->
+      <service
+        android:name="com.rise.FocusTimerService"
+        android:exported="false"
+        android:foregroundServiceType="specialUse">
+        <property
+          android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+          android:value="Countdown focus timer started by the user from a home-screen widget or the app; must finish and alert at an exact time with the app closed." />
+      </service>
 
       <receiver
         android:name="com.rise.BootReceiver"

@@ -178,7 +178,7 @@ Generated binary locations:
 
 ## License
 
-**Copyright (c) 2026 Rahul Saini (jeelo).**
+**Copyright (c) 2026 Rahul Saini.**
 
 This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**.
 

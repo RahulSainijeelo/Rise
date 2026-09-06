@@ -498,3 +498,27 @@ export function shiftHue(hex: string, degrees: number): string {
         .join('');
     return `#${out}`;
 }
+
+/**
+ * A foreground that can be read on top of `hex`.
+ *
+ * The filled buttons used to hard-code white on the ring colour. Four of the five ring
+ * themes are dark enough for that to work; `mono` is #FFFFFF, so its start button was
+ * white text and a white icon on a white fill — a blank white button, exactly as
+ * reported. `aurora` (#00E5A0) was close behind.
+ *
+ * Relative luminance rather than a per-theme override, so a ring colour added later
+ * cannot reintroduce the bug.
+ */
+export function onTint(hex: string): string {
+    const { r, g, b } = hexToRgb(hex);
+    const channel = (v: number): number => {
+        const s = v / 255;
+        return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+    };
+    const luminance =
+        0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+    // 0.35 rather than the midpoint: white-on-colour stays readable further down the
+    // scale than black-on-colour does, and the palette is mostly saturated mid-tones.
+    return luminance > 0.35 ? '#000000' : '#FFFFFF';
+}

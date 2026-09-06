@@ -11,13 +11,24 @@ import { NothingCard } from '../components/NothingCard';
 import { NothingButton } from '../components/NothingButton';
 import { NothingInput } from '../components/NothingInput';
 import { ConfirmationModal } from '../components/ConfirmationModal';
+import { NoiseCalibrator } from '../components/NoiseCalibrator';
 import { useAppStore } from '../store/useAppStore';
 import { SoundService } from '../services/SoundService';
 const { width } = Dimensions.get('window');
 const CIRCLE_SIZE = width * 0.7;
 
-import { sensorService, type LiveSensorData } from '../services/SensorService';
-import type { SensorSlot } from '../services/WidgetContract';
+import { sensorService, clampNoiseThreshold, type LiveSensorData } from '../services/SensorService';
+import { habitSlot } from '../services/WidgetContract';
+import {
+    getHabitTimer,
+    habitTimerOp,
+    habitRemainingMs,
+    idleHabitTimer,
+    type HabitTimerState,
+    type HabitTimerOp,
+} from '../services/HabitTimer';
+import { applyPendingWidgetOps } from '../services/WidgetOpsService';
+import { missingSensorPermissions, permissionLabel, requestSensorPermissions } from '../utils/permissions';
 import {
     habitStep,
     formatHabitValue,
@@ -33,8 +44,21 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
     const { habits, updateHabit, deleteHabit, toggleHabit } = useAppStore();
     const habit = habits.find(h => h.id === habitId);
 
-    const [isTimerRunning, setIsTimerRunning] = useState(false);
-    const [timeLeft, setTimeLeft] = useState(habit?.timerGoal || 0);
+    // The countdown is native state, not React state.
+    //
+    // What used to be here was `timeLeft` in useState plus a setInterval. That clock
+    // stopped the instant this screen unmounted, and it banked nothing until it hit
+    // zero — so backgrounding the app twenty minutes into a twenty-five minute run
+    // threw all twenty minutes away. HabitTimer keeps a wall-clock deadline in native
+    // prefs, credits the seconds as they are earned, and is the same state the
+    // wrapper widget drives. See src/services/HabitTimer.ts.
+    const timerGoalSeconds = habit?.timerGoal || 0;
+    const [timerState, setTimerState] = useState<HabitTimerState>(() =>
+        idleHabitTimer(habitId, timerGoalSeconds),
+    );
+    // Purely a repaint pulse. Every number shown is derived from the deadline, so a
+    // dropped tick costs a frame rather than a second.
+    const [, setTick] = useState(0);
     const [showSettings, setShowSettings] = useState(false);
     const [editTitle, setEditTitle] = useState(habit?.title || '');
     const [editGoal, setEditGoal] = useState(((habit?.timerGoal || 0) / 60).toString());
@@ -51,18 +75,30 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
     // where it does not belong or during the first async check.
     const [usageAccess, setUsageAccess] = useState(true);
 
+    // Runtime permissions this habit's sensor still lacks. Same "assume fine until
+    // the check comes back" rule as above: an empty list draws nothing.
+    const [missingPerms, setMissingPerms] = useState<string[]>([]);
+
     const timerRef = useRef<any>(null);
     const today = dayjs().format('YYYY-MM-DD');
     const isCompletedToday = habit?.completedDates.includes(today) || false;
     const isAtMost = (habit?.goalDirection || 'atLeast') === 'atMost';
 
+    const isTimerRunning = timerState.mode === 'running';
+    const timeLeft = Math.ceil(habitRemainingMs(timerState) / 1000);
+
     // Which of the three kinds of sensor habit this is, because each gets a
     // different control set: counters (steps/distance) get an on/off switch and no
     // hand-editing, Deep Silence gets play/pause over the microphone, and Digital
     // Sunset keeps its held/slipped judgement call.
-    const sensorSlot = (habit?.sensorType || null) as SensorSlot | null;
+    //
+    // Via habitSlot rather than habit.sensorType, so the pause switch and the noise
+    // controls still resolve for a habit whose sensorType went missing but whose
+    // templateId is intact — otherwise the screen renders a sensor habit with no way
+    // to pause it and no live section.
+    const sensorSlot = habit ? habitSlot(habit) : null;
     const sensorDerived = habit ? isSensorDerived(habit) : false;
-    const isNoiseHabit = habit?.sensorType === 'noise';
+    const isNoiseHabit = sensorSlot === 'noise';
 
     /**
      * Is this habit's sensor actually collecting right now?
@@ -116,7 +152,7 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
      * navigation event, which is why the re-check hangs off AppState and not focus.
      */
     useEffect(() => {
-        if (habit?.sensorType !== 'screen') return;
+        if (sensorSlot !== 'screen') return;
         let cancelled = false;
         const check = () => {
             sensorService.hasUsageStatsPermission().then(ok => {
@@ -131,7 +167,47 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
             cancelled = true;
             sub.remove();
         };
-    }, [habit?.sensorType]);
+    }, [sensorSlot]);
+
+    /**
+     * Re-check this habit's runtime permissions whenever the app comes forward.
+     *
+     * A denied permission was previously invisible from inside the app: the native
+     * service logged its bail and returned, and this screen went on drawing a
+     * confident zero, which reads as a broken sensor rather than as something the
+     * user can fix in one tap. Hangs off AppState because granting happens either in
+     * the system dialog or, after a permanent denial, in Settings — neither of which
+     * is a navigation event.
+     */
+    useEffect(() => {
+        if (!sensorSlot || !habit) return;
+        let cancelled = false;
+        const check = () => {
+            missingSensorPermissions(habit).then(missing => {
+                if (!cancelled) setMissingPerms(missing);
+            });
+        };
+        check();
+        const sub = AppState.addEventListener('change', (next) => {
+            if (next === 'active') check();
+        });
+        return () => {
+            cancelled = true;
+            sub.remove();
+        };
+    }, [sensorSlot, habit?.id]);
+
+    /** Ask for whatever is missing, then re-check and restart tracking if it worked. */
+    const grantSensorPermissions = async () => {
+        if (!habit) return;
+        Vibration.vibrate(20);
+        await requestSensorPermissions([habit]);
+        const still = await missingSensorPermissions(habit);
+        setMissingPerms(still);
+        // A newly granted sensor has to be picked up: the service decided what to
+        // listen to when it started, back when it was not allowed to listen at all.
+        if (still.length === 0) sensorService.refreshConfig(useAppStore.getState);
+    };
 
     // Keep the config current: adding or editing a sensor habit has to
     // reconfigure tracking, which previously only happened once at app start.
@@ -139,16 +215,13 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
         if (habit?.isSensorBased) {
             sensorService.refreshConfig(useAppStore.getState);
         }
-    }, [habit?.id, habit?.sensorType, habit?.numericGoal, habit?.timerGoal, habit?.cutoffTime, habit?.allowanceMinutes]);
+    }, [habit?.id, sensorSlot, habit?.numericGoal, habit?.timerGoal, habit?.cutoffTime, habit?.allowanceMinutes]);
 
     // Sync state when habit updates or timer goal changes
     useEffect(() => {
         if (habit) {
             setEditTitle(habit.title);
             setEditGoal(((habit.timerGoal || 0) / 60).toString());
-            if (habit.type === 'timer' && !isTimerRunning) {
-                setTimeLeft(habit.timerGoal || 0);
-            }
         }
     }, [habit?.id, habit?.timerGoal]);
 
@@ -163,33 +236,77 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
         wasCompleted.current = isCompletedToday;
     }, [isCompletedToday, habit?.isSensorBased]);
 
+    /**
+     * Adopt whatever native currently believes.
+     *
+     * Runs on mount and on every return to this screen, because the run may have been
+     * started from the widget, settled by the expiry alarm, or finished while the app
+     * was not running at all. The screen is a view, never the owner.
+     */
     useEffect(() => {
-        // Deep Silence's clock lives in the foreground service: it must keep running
-        // with the app closed and must survive being killed, so a JS setInterval is
-        // not allowed anywhere near it.
-        if (isNoiseHabit) return;
-        if (isTimerRunning && timeLeft > 0) {
-            timerRef.current = setInterval(() => {
-                setTimeLeft(prev => {
-                    if (prev <= 1) {
-                        setIsTimerRunning(false);
-                        SoundService.playSound('timer_end');
-                        if (habit && !habit.completedDates.includes(today)) {
-                            toggleHabit(habitId, today);
-                        }
-                        return 0;
-                    }
-                    return prev - 1;
-                });
-            }, 1000);
-        } else {
-            if (timerRef.current) clearInterval(timerRef.current);
-        }
+        if (habit?.type !== 'timer' || isNoiseHabit) return;
+        let alive = true;
+        const pull = () => {
+            getHabitTimer(habitId, timerGoalSeconds).then(s => {
+                if (alive) setTimerState(s);
+            });
+        };
+        pull();
+        const unsubscribe = navigation.addListener('focus', pull);
+        return () => {
+            alive = false;
+            unsubscribe();
+        };
+    }, [habitId, habit?.type, isNoiseHabit, timerGoalSeconds, navigation]);
 
+    // Repaint once a second while a run is going. Deliberately not a countdown: it
+    // does not decide anything, it only asks React to look at the clock again.
+    useEffect(() => {
+        if (!isTimerRunning) return;
+        timerRef.current = setInterval(() => setTick(t => t + 1), 1000);
         return () => {
             if (timerRef.current) clearInterval(timerRef.current);
         };
     }, [isTimerRunning]);
+
+    // Crossing zero is native's to settle, so ask rather than decide. That keeps the
+    // completion identical whether the screen was open, closed, or the phone asleep —
+    // which is the whole reason the deadline lives outside React.
+    const timerFinished = habit?.type === 'timer' && !isNoiseHabit && isTimerRunning && timeLeft <= 0;
+    useEffect(() => {
+        if (!timerFinished) return;
+        let alive = true;
+        getHabitTimer(habitId, timerGoalSeconds).then(s => {
+            if (!alive) return;
+            setTimerState(s);
+            // read() settled the overdue run and banked the full duration as an op;
+            // drain it here so the ring lands on the number the run just earned.
+            applyPendingWidgetOps(useAppStore.getState);
+            SoundService.playSound('timer_end');
+            Vibration.vibrate(200);
+        });
+        return () => {
+            alive = false;
+        };
+    }, [timerFinished, habitId, timerGoalSeconds]);
+
+    /**
+     * Start, pause, resume or reset the run, then adopt what native produced.
+     *
+     * The drain is not optional. Native cannot write the zustand store, so every
+     * settle point banks its seconds as a PendingOp instead; App.tsx only drains that
+     * queue on a return to the foreground, which never happens while the user is
+     * sitting on this screen. Without this, pausing a run would move the countdown
+     * but leave "today" showing the same number it showed before — which is the exact
+     * complaint the timer rebuild exists to answer.
+     */
+    const runTimerOp = (op: HabitTimerOp) => {
+        Vibration.vibrate(20);
+        habitTimerOp(habitId, op, timerGoalSeconds).then(state => {
+            setTimerState(state);
+            applyPendingWidgetOps(useAppStore.getState);
+        });
+    };
 
     if (!habit) {
         return (
@@ -247,10 +364,43 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
     const noiseElapsed = Math.max(habit.timerProgress?.[today] || 0, liveData.noiseSeconds || 0);
     const noiseRemaining = Math.max(0, noiseGoal - noiseElapsed);
 
+    /**
+     * The threshold the meter draws and the accrual tests against.
+     *
+     * Read from the habit, not from liveData, even though the tracker reports its own
+     * copy. The tracker's copy only arrives on its next publish, up to a second later,
+     * so driving the marker from it made the slider lag a full second behind the
+     * finger. Both sides apply clampNoiseThreshold to the same stored field, so there
+     * is nothing for them to disagree about — liveData.noiseThresholdDb exists so the
+     * widget can describe the line it is using, not so this screen can re-derive it.
+     */
+    const noiseThreshold = clampNoiseThreshold(habit.noiseThresholdDb);
+
+    /** True only when a second passing right now would actually be banked. */
+    const noiseBanking =
+        trackingOn &&
+        liveData.noiseListening &&
+        liveData.noiseHasReading &&
+        liveData.noise <= noiseThreshold;
+
+    /**
+     * Persist a new threshold and push it to whichever tracker is running.
+     *
+     * refreshConfig is not optional. The native service holds its own copy of the
+     * config and only re-reads it when JS hands over a new one, and startGlobalTracking
+     * short-circuits on an unchanged config blob — so without this the slider would
+     * move, the store would update, and the microphone would go on judging seconds
+     * against the old number.
+     */
+    const setNoiseThreshold = (db: number) => {
+        updateHabit(habitId, { noiseThresholdDb: clampNoiseThreshold(db) });
+        sensorService.refreshConfig(useAppStore.getState);
+    };
+
     // Counters read from the sensor, not from the store, so the figure on screen
     // moves as you walk instead of one commit behind.
     const storedValue = habitProgress(habit, today);
-    const liveValue = habit.sensorType === 'gps' ? liveData.distanceMeters / 1000 : liveData.steps;
+    const liveValue = sensorSlot === 'gps' ? liveData.distanceMeters / 1000 : liveData.steps;
     const shownValue = sensorDerived ? Math.max(storedValue, liveValue) : storedValue;
     const isDistance = habitDisplayMode(habit) === 'distance';
     const displayedProgress = sensorDerived
@@ -342,33 +492,70 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
                     }} />
                 </View>
 
-                {habit.sensorType === 'pedometer' || habit.sensorType === 'movement' ? (
+                {/* The reason the numbers below are zero, when that is the reason.
+                    Rendered above every slot's live section rather than inside one,
+                    because a refused permission produces the same convincing zero
+                    whichever sensor it belonged to. */}
+                {missingPerms.length > 0 && (
+                    <TouchableOpacity
+                        onPress={grantSensorPermissions}
+                        style={{
+                            marginBottom: 16,
+                            padding: 12,
+                            borderWidth: 1,
+                            borderColor: theme.colors.error,
+                            borderRadius: 4,
+                        }}
+                    >
+                        <NothingText variant="bold" size={11} color={theme.colors.error}>
+                            {`${missingPerms.map(permissionLabel).join(' + ')} NOT GRANTED`}
+                        </NothingText>
+                        <NothingText size={11} color={theme.colors.textSecondary} style={{ marginTop: 4 }}>
+                            Nothing can be measured without it, so this habit will stay at zero. Tap to grant.
+                        </NothingText>
+                    </TouchableOpacity>
+                )}
+
+                {sensorSlot === 'pedometer' || sensorSlot === 'movement' ? (
+                    /*
+                      No step count here. This card used to repeat the same figure the
+                      main readout shows a few hundred pixels away, at 48px against 80px
+                      — the user's "showing measures two times". The count has one home,
+                      the one that also carries the goal; this card is for the things
+                      that reading cannot tell you.
+
+                      The bar is the live activity level. It replaced a 30-bar sparkline
+                      built from Math.random(), which moved convincingly on every
+                      repaint while meaning nothing at all.
+                    */
                     <View>
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' }}>
                             <View>
-                                <NothingText variant="dot" size={48}>{liveData.steps}</NothingText>
-                                <NothingText size={12} color={theme.colors.textSecondary}>STEPS DETECTED</NothingText>
-                            </View>
-                            <View style={{ alignItems: 'flex-end' }}>
                                 <NothingText variant="bold" size={14}>{liveData.activity.toFixed(1)}%</NothingText>
                                 <NothingText size={10} color={theme.colors.textSecondary}>ACTIVITY LEVEL</NothingText>
                             </View>
+                            <View style={{ alignItems: 'flex-end' }}>
+                                <NothingText variant="bold" size={14} color={trackingOn ? theme.colors.success : theme.colors.textSecondary}>
+                                    {trackingOn ? 'COUNTING' : 'PAUSED'}
+                                </NothingText>
+                                <NothingText size={10} color={theme.colors.textSecondary}>SENSOR</NothingText>
+                            </View>
                         </View>
-                        <View style={{ height: 40, flexDirection: 'row', alignItems: 'flex-end', gap: 2, marginTop: 12 }}>
-                            {Array.from({ length: 30 }).map((_, i) => (
-                                <View
-                                    key={i}
-                                    style={{
-                                        flex: 1,
-                                        backgroundColor: theme.colors.primary,
-                                        height: Math.max(4, Math.random() * (liveData.activity / 2)),
-                                        opacity: 0.3 + (i / 30) * 0.7
-                                    }}
-                                />
-                            ))}
+                        <View style={{ width: '100%', height: 4, backgroundColor: theme.colors.border, borderRadius: 2, marginTop: 12 }}>
+                            <View style={{
+                                width: `${Math.min(100, Math.max(0, liveData.activity))}%`,
+                                height: '100%',
+                                backgroundColor: theme.colors.primary,
+                                borderRadius: 2,
+                            }} />
                         </View>
+                        <NothingText size={11} color={theme.colors.textSecondary} style={{ marginTop: 8 }}>
+                            {sensorSlot === 'movement'
+                                ? 'Movement past the walking threshold counts. Shaking the phone does not.'
+                                : 'Steps are counted by the hardware step sensor, in the background.'}
+                        </NothingText>
                     </View>
-                ) : habit.sensorType === 'screen' ? (
+                ) : sensorSlot === 'screen' ? (
                     <View>
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' }}>
                             <View>
@@ -427,45 +614,59 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
                             </TouchableOpacity>
                         )}
                     </View>
-                ) : habit.sensorType === 'noise' ? (
-                    <View>
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <NothingText variant="dot" size={48}>{liveData.noise}dB</NothingText>
-                            <View style={{ flexDirection: 'row', gap: 4 }}>
-                                {Array.from({ length: 5 }).map((_, i) => (
-                                    <View
-                                        key={i}
-                                        style={{
-                                            width: 8,
-                                            height: 20 + Math.random() * 20,
-                                            backgroundColor: liveData.noise > 60 ? theme.colors.error : theme.colors.success,
-                                            opacity: 0.8
-                                        }}
-                                    />
-                                ))}
-                            </View>
-                        </View>
-                        <NothingText size={12} color={theme.colors.textSecondary}>AMBIENT NOISE LEVEL</NothingText>
-                    </View>
-                ) : habit.sensorType === 'gps' ? (
+                ) : sensorSlot === 'noise' ? (
+                    <NoiseCalibrator
+                        db={liveData.noise}
+                        listening={liveData.noiseListening && trackingOn}
+                        hasReading={liveData.noiseHasReading}
+                        thresholdDb={noiseThreshold}
+                        streakSeconds={liveData.noiseStreakSeconds}
+                        breaches={liveData.noiseBreaches}
+                        onChangeThreshold={setNoiseThreshold}
+                    />
+                ) : sensorSlot === 'gps' ? (
+                    /*
+                      Same reasoning as the step card: the distance itself belongs to the
+                      main readout, which is the one that also states the goal. What this
+                      card adds is how far along the goal that distance is, and whether
+                      anything is being measured at all.
+                    */
                     <View>
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                             <View>
-                                <NothingText variant="dot" size={32}>
-                                    {liveData.distanceMeters < 1000
-                                        ? `${Math.floor(liveData.distanceMeters)}m`
-                                        : `${Math.floor(liveData.distanceMeters / 1000)}km ${Math.floor(liveData.distanceMeters % 1000)}m`
-                                    }
+                                <NothingText variant="bold" size={14}>
+                                    {`${Math.min(100, Math.round((liveData.distanceMeters / 1000) / (habit.numericGoal || 1) * 100))}%`}
+                                </NothingText>
+                                <NothingText size={10} color={theme.colors.textSecondary}>
+                                    {`OF ${habit.numericGoal || 0}${(habit.numericUnit || 'KM').toUpperCase()}`}
                                 </NothingText>
                             </View>
-                            <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: theme.colors.primary + '20', alignItems: 'center', justifyContent: 'center' }}>
-                                <Activity size={20} color={theme.colors.primary} />
+                            <View style={{ alignItems: 'flex-end' }}>
+                                {/* What the tracker is actually doing. A distance habit
+                                    reads zero for four unrelated reasons and they all
+                                    used to look the same from here. */}
+                                <NothingText
+                                    variant="bold"
+                                    size={12}
+                                    color={
+                                        !trackingOn ? theme.colors.textSecondary
+                                            : liveData.gpsNote ? theme.colors.error
+                                                : theme.colors.success
+                                    }
+                                >
+                                    {!trackingOn ? 'PAUSED' : liveData.gpsNote || 'MEASURING'}
+                                </NothingText>
+                                <NothingText size={10} color={theme.colors.textSecondary}>LOCATION</NothingText>
                             </View>
                         </View>
-                        {/* <View style={{ height: 1.5, backgroundColor: theme.colors.border, marginVertical: 12, opacity: 0.5 }} /> */}
                         <View style={{ width: '100%', height: 4, backgroundColor: theme.colors.border, borderRadius: 2, marginVertical: 12 }}>
                             <View style={{ width: `${Math.min(100, (liveData.distanceMeters / 1000) / (habit.numericGoal || 1) * 100)}%`, height: '100%', backgroundColor: theme.colors.primary, borderRadius: 2 }} />
                         </View>
+                        <NothingText size={11} color={theme.colors.textSecondary}>
+                            {trackingOn
+                                ? 'Measured from GPS fixes, so it needs open sky — indoors it will sit at zero.'
+                                : 'Location released. Nothing is being measured until you switch it back on.'}
+                        </NothingText>
                     </View>
                 ) : null}
             </NothingCard>
@@ -547,39 +748,55 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
                                         </TouchableOpacity>
                                     </View>
 
+                                    {/*
+                                      The live level and the threshold marker live in
+                                      the card above, so this line answers the other
+                                      question: is the clock moving right now, and why.
+                                      A silence timer that has simply stopped is
+                                      otherwise indistinguishable from a dead mic.
+                                    */}
                                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 18 }}>
                                         {trackingOn ? (
-                                            <Mic size={14} color={theme.colors.success} />
+                                            <Mic size={14} color={noiseBanking ? theme.colors.success : theme.colors.error} />
                                         ) : (
                                             <MicOff size={14} color={theme.colors.textSecondary} />
                                         )}
                                         <NothingText
                                             variant="bold"
                                             size={12}
-                                            color={trackingOn ? theme.colors.success : theme.colors.textSecondary}
+                                            color={
+                                                !trackingOn
+                                                    ? theme.colors.textSecondary
+                                                    : noiseBanking
+                                                        ? theme.colors.success
+                                                        : theme.colors.error
+                                            }
                                         >
-                                            {trackingOn ? `LISTENING · ${liveData.noise}dB` : 'MICROPHONE OFF'}
+                                            {!trackingOn
+                                                ? 'MICROPHONE OFF'
+                                                : !liveData.noiseHasReading
+                                                    ? 'OPENING MICROPHONE'
+                                                    : noiseBanking
+                                                        ? `COUNTING · ${liveData.noise} dB`
+                                                        : `PAUSED BY NOISE · ${liveData.noise} dB`}
                                         </NothingText>
                                     </View>
                                     <NothingText size={11} color={theme.colors.textSecondary} style={{ marginTop: 8, paddingHorizontal: 40, textAlign: 'center' }}>
-                                        {`${Math.floor(noiseElapsed / 60)}m ${noiseElapsed % 60}s of quiet banked today, under ${habit.noiseThresholdDb ?? 45}dB. The count is kept if you close Rise or restart your phone.`}
+                                        {`${Math.floor(noiseElapsed / 60)}m ${noiseElapsed % 60}s of quiet banked today, counted only while the room stays at or under ${noiseThreshold}. The count is kept if you close Rise or restart your phone.`}
                                     </NothingText>
                                 </>
                             ) : (
                                 <View style={styles.timerControls}>
                                     <TouchableOpacity
                                         style={[styles.controlBtn, { backgroundColor: theme.colors.surface1 }]}
-                                        onPress={() => {
-                                            setIsTimerRunning(false);
-                                            setTimeLeft(habit.timerGoal || 0);
-                                        }}
+                                        onPress={() => runTimerOp('reset')}
                                     >
                                         <RotateCcw size={24} color={theme.colors.text} />
                                     </TouchableOpacity>
 
                                     <TouchableOpacity
                                         style={[styles.playBtn, { backgroundColor: theme.colors.primary }]}
-                                        onPress={() => setIsTimerRunning(!isTimerRunning)}
+                                        onPress={() => runTimerOp('toggle')}
                                     >
                                         {isTimerRunning ?
                                             <Pause size={32} color={theme.colors.background} fill={theme.colors.background} /> :
@@ -587,14 +804,21 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
                                         }
                                     </TouchableOpacity>
 
+                                    {/* Marks the habit done. It used to set the clock to
+                                        zero instead, which looked like completion but
+                                        touched nothing the streak reads. */}
                                     <TouchableOpacity
                                         style={[styles.controlBtn, { backgroundColor: theme.colors.surface1 }]}
                                         onPress={() => {
-                                            setIsTimerRunning(false);
-                                            setTimeLeft(0);
+                                            Vibration.vibrate(20);
+                                            toggleHabit(habitId, today);
                                         }}
                                     >
-                                        <Check size={24} color={theme.colors.success} />
+                                        {isCompletedToday ? (
+                                            <X size={24} color={theme.colors.error} />
+                                        ) : (
+                                            <Check size={24} color={theme.colors.success} />
+                                        )}
                                     </TouchableOpacity>
                                 </View>
                             )}
@@ -632,7 +856,7 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
                             </View>
 
                             <NothingText variant="bold" style={{ marginTop: 24 }}>
-                                {isAtMost ? 'LIMIT' : 'GOAL'}: {habit.sensorType === 'gps' && habit.numericUnit === 'km'
+                                {isAtMost ? 'LIMIT' : 'GOAL'}: {sensorSlot === 'gps' && habit.numericUnit === 'km'
                                     ? ((habit.numericGoal || 0) * 1000 >= 1000
                                         ? `${habit.numericGoal}km`
                                         : `${(habit.numericGoal || 0) * 1000}m`)

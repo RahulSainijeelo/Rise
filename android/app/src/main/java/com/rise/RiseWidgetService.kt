@@ -14,14 +14,23 @@ import java.util.Locale
 
 class RiseWidgetService : RemoteViewsService() {
     override fun onGetViewFactory(intent: Intent): RemoteViewsFactory {
-        return RiseWidgetFactory(applicationContext)
+        // The widget id decides whether this instance is showing tasks or its
+        // label picker, so the factory has to know which widget it belongs to.
+        val appWidgetId = intent.getIntExtra(
+            android.appwidget.AppWidgetManager.EXTRA_APPWIDGET_ID,
+            android.appwidget.AppWidgetManager.INVALID_APPWIDGET_ID
+        )
+        return RiseWidgetFactory(applicationContext, appWidgetId)
     }
 }
 
-class RiseWidgetFactory(private val context: Context) : RemoteViewsService.RemoteViewsFactory {
-    
+class RiseWidgetFactory(
+    private val context: Context,
+    private val appWidgetId: Int
+) : RemoteViewsService.RemoteViewsFactory {
+
     private var items: MutableList<WidgetItem> = mutableListOf()
-    
+
     data class WidgetItem(
         val id: String,
         val title: String,
@@ -32,7 +41,11 @@ class RiseWidgetFactory(private val context: Context) : RemoteViewsService.Remot
         val dueTime: String?,
         val priority: Int,
         val habitType: String? = null,
-        val isDateHeader: Boolean = false
+        val isDateHeader: Boolean = false,
+        /** A row in the in-widget label picker rather than a task. */
+        val isLabelRow: Boolean = false,
+        /** Only meaningful for label rows: this label is the active filter. */
+        val isSelectedLabel: Boolean = false
     )
 
     override fun onCreate() {
@@ -42,13 +55,69 @@ class RiseWidgetFactory(private val context: Context) : RemoteViewsService.Remot
     override fun onDataSetChanged() {
         Log.d("RiseWidget", "Factory onDataSetChanged")
         items.clear()
+
+        val sharedPref = context.getSharedPreferences(WidgetContract.PREFS_NAME, Context.MODE_PRIVATE)
+        val selectedLabel = sharedPref.getString(WidgetContract.KEY_SELECTED_LABEL, WidgetContract.LABEL_ALL)
+            ?: WidgetContract.LABEL_ALL
+
+        if (appWidgetId != android.appwidget.AppWidgetManager.INVALID_APPWIDGET_ID &&
+            sharedPref.getBoolean(WidgetContract.labelPickerKey(appWidgetId), false)
+        ) {
+            loadLabels(sharedPref, selectedLabel)
+            return
+        }
+
+        loadTasks(sharedPref, selectedLabel)
+    }
+
+    /**
+     * The picker's rows. "All" is synthesised rather than stored, because it is
+     * the absence of a filter and no label with that name has to exist.
+     */
+    private fun loadLabels(
+        sharedPref: android.content.SharedPreferences,
+        selectedLabel: String
+    ) {
+        val names = mutableListOf(WidgetContract.LABEL_ALL)
         try {
-            val sharedPref = context.getSharedPreferences("RiseWidgetPrefs", Context.MODE_PRIVATE)
-            val dataString = sharedPref.getString("widgetData", "[]") ?: "[]"
-            val selectedLabel = sharedPref.getString("selectedLabel", "All") ?: "All"
-            
+            val raw = sharedPref.getString(WidgetContract.KEY_WIDGET_LABELS, "[]") ?: "[]"
+            val arr = JSONArray(raw)
+            for (i in 0 until arr.length()) {
+                val name = arr.optJSONObject(i)?.optString("name").orEmpty()
+                if (name.isNotEmpty() && !names.contains(name)) names.add(name)
+            }
+        } catch (e: Exception) {
+            Log.e("RiseWidget", "Error loading labels", e)
+        }
+
+        for (name in names) {
+            items.add(
+                WidgetItem(
+                    id = "label_$name",
+                    title = name,
+                    status = "",
+                    type = "label",
+                    category = name,
+                    dueDate = "",
+                    dueTime = null,
+                    priority = 0,
+                    isLabelRow = true,
+                    isSelectedLabel = name == selectedLabel
+                )
+            )
+        }
+        Log.d("RiseWidget", "Picker rows: ${items.size}")
+    }
+
+    private fun loadTasks(
+        sharedPref: android.content.SharedPreferences,
+        selectedLabel: String
+    ) {
+        try {
+            val dataString = sharedPref.getString(WidgetContract.KEY_WIDGET_DATA, "[]") ?: "[]"
+
             Log.d("RiseWidget", "Selected label: $selectedLabel")
-            
+
             val jsonArray = JSONArray(dataString)
             val tempItems = mutableListOf<WidgetItem>()
             val inputFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
@@ -70,7 +139,7 @@ class RiseWidgetFactory(private val context: Context) : RemoteViewsService.Remot
                 val category = obj.optString("category", "Inbox")
                 val type = obj.optString("type", "task")
                 
-                if (selectedLabel != "All" && type == "task" && category != selectedLabel) {
+                if (selectedLabel != WidgetContract.LABEL_ALL && type == "task" && category != selectedLabel) {
                     continue
                 }
                 
@@ -151,8 +220,39 @@ class RiseWidgetFactory(private val context: Context) : RemoteViewsService.Remot
         
         if (position < items.size) {
             val item = items[position]
-            
-            if (item.isDateHeader) {
+
+            if (item.isLabelRow) {
+                val density = context.resources.displayMetrics.density
+                val padding = (10 * density).toInt()
+                views.setInt(R.id.widget_item_container, "setBackgroundResource", R.drawable.widget_item_bg)
+                views.setViewPadding(R.id.widget_item_container, padding, padding, padding, padding)
+
+                // The filled checkbox doubles as the radio dot: exactly one label
+                // is active, so a tick on the current one reads correctly.
+                views.setViewVisibility(R.id.widget_item_checkbox, View.VISIBLE)
+                views.setImageViewResource(
+                    R.id.widget_item_checkbox,
+                    if (item.isSelectedLabel) R.drawable.widget_checkbox_filled else R.drawable.widget_checkbox
+                )
+
+                views.setTextViewText(R.id.widget_item_title, item.title)
+                views.setFloat(R.id.widget_item_title, "setTextSize", 13f)
+                views.setTextColor(
+                    R.id.widget_item_title,
+                    if (item.isSelectedLabel) 0xFFD71921.toInt() else 0xFFFFFFFF.toInt()
+                )
+
+                views.setViewVisibility(R.id.widget_item_datetime, View.GONE)
+                views.setViewVisibility(R.id.widget_item_type, View.GONE)
+                views.setViewVisibility(R.id.widget_item_priority, View.GONE)
+
+                // Only the label travels; the template already carries the action
+                // and the widget id, and fillIn cannot overwrite what it set.
+                views.setOnClickFillInIntent(
+                    R.id.widget_item_container,
+                    Intent().putExtra(RiseWidget.EXTRA_LABEL, item.title)
+                )
+            } else if (item.isDateHeader) {
                 // Date header - minimal styling, no card background
                 views.setTextViewText(R.id.widget_item_title, item.title)
                 views.setTextColor(R.id.widget_item_title, 0xFF888888.toInt())

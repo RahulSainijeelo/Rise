@@ -217,12 +217,39 @@
         <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_habit_info" />
       </receiver>
 
+      <!--
+        The wrapper widget. One instance shows one habit chosen by the user, so unlike
+        the five sensor providers there is nothing template-shaped about it.
+
+        Only APPWIDGET_UPDATE and WIDGET_UPDATE are filtered. HABIT_TIMER, WIDGET_CONTROL,
+        PICK_HABIT and LINK_HABIT are all delivered by PendingIntents that target this
+        component explicitly, so they need no filter, and declaring one would only
+        advertise them. What keeps a forged tap out is the token check in
+        WidgetContract.isTrustedControl, which every branch of onReceive performs.
+      -->
+      <receiver
+        android:name="com.rise.HabitLinkWidget"
+        android:exported="true"
+        android:label="@string/habit_link_widget_label"
+        android:icon="@drawable/widget_icon_habits">
+        <intent-filter>
+            <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            <action android:name="com.rise.WIDGET_UPDATE" />
+        </intent-filter>
+        <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_habit_link_info" />
+      </receiver>
+
       <service
         android:name="com.rise.RiseWidgetService"
         android:permission="android.permission.BIND_REMOTEVIEWS"
         android:exported="false" />
       <service
         android:name="com.rise.HabitGridService"
+        android:permission="android.permission.BIND_REMOTEVIEWS"
+        android:exported="false" />
+      <!-- Rows for the wrapper widget's in-widget habit picker. -->
+      <service
+        android:name="com.rise.HabitPickerService"
         android:permission="android.permission.BIND_REMOTEVIEWS"
         android:exported="false" />
 

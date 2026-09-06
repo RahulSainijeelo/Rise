@@ -260,11 +260,39 @@ class SensorForegroundService : Service(), SensorEventListener {
     private var lastLocation: Location? = null
     /** Wall clock of the anchor fix, for the implied-speed sanity check. */
     private var lastFixMs = 0L
+    /**
+     * Why distance is not accruing, as a short label, or "" when it is fine.
+     *
+     * A distance habit reads zero for several unrelated reasons — permission refused,
+     * the system location toggle off, no provider, or simply no fix yet indoors — and
+     * every one of them used to look identical from the outside: a confident 0.0 KM
+     * and a line in logcat nobody reads. This is that reason, carried to the widget
+     * and the habit screen so the number can explain itself.
+     */
+    private var locationBlockedReason = ""
 
+    /**
+     * Latest ambient level on the 0-100 scale, and whether it means anything yet.
+     *
+     * The flag is not redundant. 0 is a legal reading — an RMS at or below -100 dBFS
+     * clamps to it — so "0 means no microphone yet" was a sentinel that a genuinely
+     * silent room could collide with, at which point the habit would refuse to accrue
+     * in exactly the conditions it exists to reward.
+     */
+    @Volatile
     private var currentDb = 0
+    @Volatile
+    private var haveDbReading = false
     private var noiseSeconds = 0
     /** noiseSeconds at the last persist, so accrual banks every ten seconds. */
     private var lastNoisePersistSeconds = 0
+    /**
+     * Seconds of unbroken quiet right now, and how many times today that streak has
+     * been broken after having been worth something. Neither is the timer: the timer
+     * is the total, these are what make the total legible.
+     */
+    private var quietStreakSeconds = 0
+    private var noiseBreaches = 0
     @Volatile
     private var noiseThreadRunning = false
     private var noiseThread: Thread? = null
@@ -511,7 +539,15 @@ class SensorForegroundService : Service(), SensorEventListener {
         val parts = mutableListOf<String>()
         if (wantsSteps()) parts.add("$steps steps")
         if (wantsLocation()) parts.add(String.format("%.1f km", distanceMeters / 1000.0))
-        if (wantsNoise()) parts.add("${noiseSeconds / 60} min quiet")
+        if (wantsNoise()) {
+            // Naming the level too, because the notification is the one surface the
+            // user sees while the phone is in their pocket and the timer is not
+            // moving. "12 min quiet" alone cannot tell them the room is too loud.
+            parts.add(
+                if (noiseThreadRunning && haveDbReading) "${noiseSeconds / 60} min quiet · $currentDb dB"
+                else "${noiseSeconds / 60} min quiet"
+            )
+        }
         if (wantsScreen() && sunsetWindowOpen) {
             parts.add(
                 if (sunsetSource == WidgetContract.VERIFY_USAGESTATS) "$sunsetMinutes min screen"
@@ -667,6 +703,10 @@ class SensorForegroundService : Service(), SensorEventListener {
         }
 
         if (wantsLocation()) startLocation() else stopLocation()
+        // Before start/stop, so a threshold the user just changed is in force on the
+        // very next second even when the microphone is already open and startNoise()
+        // returns early.
+        refreshNoiseThreshold()
         // Mirrors foregroundTypes(): if we could not claim the microphone type we
         // must not open the microphone either.
         if (wantsNoise() && !startedFromBoot) startNoise() else stopNoise()
@@ -705,9 +745,12 @@ class SensorForegroundService : Service(), SensorEventListener {
 
         if (p.getString(WidgetContract.KEY_NOISE_DATE, "") != today) {
             noiseSeconds = 0
+            noiseBreaches = 0
+            quietStreakSeconds = 0
             p.edit()
                 .putString(WidgetContract.KEY_NOISE_DATE, today)
-                .putInt(WidgetContract.KEY_NOISE_SECONDS, 0).apply()
+                .putInt(WidgetContract.KEY_NOISE_SECONDS, 0)
+                .putInt(WidgetContract.KEY_NOISE_BREACHES, 0).apply()
         }
 
         if (p.getString(WidgetContract.KEY_GPS_DATE, "") != today) {
@@ -729,6 +772,10 @@ class SensorForegroundService : Service(), SensorEventListener {
         }
         if (p.getString(WidgetContract.KEY_NOISE_DATE, "") == today) {
             noiseSeconds = p.getInt(WidgetContract.KEY_NOISE_SECONDS, 0)
+            noiseBreaches = p.getInt(WidgetContract.KEY_NOISE_BREACHES, 0)
+            // The streak is deliberately not restored. It measures an unbroken run of
+            // quiet, and a service restart is a gap we cannot vouch for.
+            lastNoisePersistSeconds = noiseSeconds
         }
         if (p.getString(WidgetContract.KEY_GPS_DATE, "") == today) {
             distanceMeters = p.getFloat(WidgetContract.KEY_GPS_METERS, 0f).toDouble()
@@ -743,6 +790,7 @@ class SensorForegroundService : Service(), SensorEventListener {
                 .putInt(WidgetContract.KEY_STEP_CARRY, stepCarry)
                 .putString(WidgetContract.KEY_STEP_DATE, dayKey)
                 .putInt(WidgetContract.KEY_NOISE_SECONDS, noiseSeconds)
+                .putInt(WidgetContract.KEY_NOISE_BREACHES, noiseBreaches)
                 .putString(WidgetContract.KEY_NOISE_DATE, dayKey)
                 .putFloat(WidgetContract.KEY_GPS_METERS, distanceMeters.toFloat())
                 .putString(WidgetContract.KEY_GPS_DATE, dayKey)
@@ -883,6 +931,11 @@ class SensorForegroundService : Service(), SensorEventListener {
              */
             if (location.hasAccuracy() && location.accuracy > ACCURACY_LIMIT_M) return
 
+            // A usable fix arrived, so whatever we were telling the user about the
+            // silence no longer holds. Cleared here rather than after the segment
+            // filters: a rejected segment still proves location is working.
+            locationBlockedReason = ""
+
             val now = System.currentTimeMillis()
             val prev = lastLocation
             // Re-anchor without accruing when the provider changes: two providers
@@ -943,12 +996,20 @@ class SensorForegroundService : Service(), SensorEventListener {
     private fun startLocation() {
         if (!hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)) {
             Log.w(TAG, "Distance habit linked but location permission not granted")
+            locationBlockedReason = WidgetContract.GPS_BLOCKED_PERMISSION
+            publishThrottled()
             return
         }
-        val lm = locationManager ?: return
+        val lm = locationManager
+        if (lm == null) {
+            locationBlockedReason = WidgetContract.GPS_BLOCKED_NO_PROVIDER
+            return
+        }
         val provider = pickLocationProvider(lm)
         if (provider == null) {
             Log.w(TAG, "Distance habit linked but every location provider is disabled")
+            locationBlockedReason = WidgetContract.GPS_BLOCKED_PROVIDER_OFF
+            publishThrottled()
             return
         }
         try {
@@ -957,9 +1018,15 @@ class SensorForegroundService : Service(), SensorEventListener {
             // swallow the movement between a rejected fix and the next good one. All
             // filtering happens in one place, above.
             lm.requestLocationUpdates(provider, LOCATION_MIN_MS, 0f, locationListener)
+            // Registered, but nothing measured yet. Still a reason worth showing: the
+            // first fix can take a minute outdoors and may never arrive indoors, and a
+            // motionless 0 M is exactly what a broken sensor looks like.
+            locationBlockedReason = WidgetContract.GPS_BLOCKED_NO_FIX
         } catch (e: Exception) {
             Log.w(TAG, "Could not start location updates", e)
+            locationBlockedReason = WidgetContract.GPS_BLOCKED_NO_PROVIDER
         }
+        publishThrottled()
     }
 
     private fun stopLocation() {
@@ -968,6 +1035,9 @@ class SensorForegroundService : Service(), SensorEventListener {
         } catch (e: Exception) { }
         lastLocation = null
         lastFixMs = 0L
+        // Not a fault: nothing is listening because nothing asked it to. Leaving a
+        // stale "waiting for a fix" here would explain a paused habit as a broken one.
+        locationBlockedReason = ""
     }
 
     // -----------------------------------------------------------------------
@@ -975,20 +1045,46 @@ class SensorForegroundService : Service(), SensorEventListener {
     // -----------------------------------------------------------------------
 
     /**
-     * Read raw PCM and convert RMS to the same 0-100 scale the JS path uses
-     * (dBFS + 100), so a threshold of 45 means the same thing whichever path is
-     * running. Without that alignment the same habit would behave differently with
-     * the app open and closed, which is exactly the class of bug this rewrite is
-     * meant to remove.
-     */
-    /**
-     * One accrued second of silence, handled on the main thread.
+     * Settle one second of listening. Main thread only — every counter it touches is
+     * also written by rollDayIfNeeded and read by publish.
      *
-     * Persisting every single second would rewrite the prefs file sixty times a
-     * minute for the whole session, so counters are banked every ten seconds; the
-     * publish itself is coalesced, so the visible timer still moves smoothly.
+     * Called every second the microphone is open, quiet or not, and that is the whole
+     * point: the old version was called only from inside the "under threshold" branch,
+     * so while the room was loud the level was measured and then never published. The
+     * number on screen sat frozen until some unrelated publish — a resume, a step, the
+     * minute tick — happened to carry it out. From the user's side the meter updated
+     * once when they pressed play and then appeared to die.
+     *
+     * @param peakDb loudest reading in that second, or -1 if no buffer arrived. A
+     *   second with no audio is not evidence either way: it neither banks nor breaks.
+     * @param seconds wall-clock seconds the reading covers, normally 1.
+     *
+     * Persisting every second would rewrite the prefs file sixty times a minute for a
+     * whole session, so the counters are banked every ten seconds while the publish —
+     * which is what actually moves the meter — runs on every call.
      */
-    private fun onNoiseAccrued() {
+    private fun onNoiseSecond(peakDb: Int, seconds: Int) {
+        // A post queued just before stopNoise ran still arrives after it. Dropping it
+        // costs at most one second and keeps the invariant the UI relies on: while the
+        // microphone is off, the streak is zero. Crediting it instead would leave the
+        // habit screen showing an advancing run of quiet next to "MICROPHONE OFF".
+        if (!noiseThreadRunning) return
+
+        if (peakDb >= 0) {
+            if (peakDb <= noiseThresholdDb) {
+                noiseSeconds += seconds
+                quietStreakSeconds += seconds
+            } else {
+                // A streak only counts as broken if it was long enough to have been a
+                // streak; see NOISE_BREACH_MIN_QUIET_SECONDS. A cough is not a broken
+                // silence.
+                if (quietStreakSeconds >= WidgetContract.NOISE_BREACH_MIN_QUIET_SECONDS) {
+                    noiseBreaches += 1
+                }
+                quietStreakSeconds = 0
+            }
+        }
+
         val moved = noiseSeconds - lastNoisePersistSeconds
         // The second test catches midnight, when noiseSeconds resets below the mark.
         if (moved >= 10 || noiseSeconds < lastNoisePersistSeconds) {
@@ -998,6 +1094,39 @@ class SensorForegroundService : Service(), SensorEventListener {
         publishThrottled()
     }
 
+    /** The user's calibrated threshold, or the shared default. */
+    @Volatile
+    private var noiseThresholdDb = WidgetContract.NOISE_THRESHOLD_DEFAULT
+
+    /**
+     * Copy the threshold out of the config blob into a field the noise thread may read.
+     *
+     * Not read from `config` on that thread, for two reasons. `config` is a plain
+     * `var` reassigned on the main thread, so without a memory barrier the recording
+     * thread has no guarantee of ever seeing a new one — a threshold the user had just
+     * dragged would have gone on being ignored until the microphone happened to
+     * restart, which is indistinguishable from the control not working. And JSONObject
+     * is not thread-safe, so reading one while loadConfig replaces it is a race even
+     * where the visibility happens to work out. A volatile Int has neither problem.
+     */
+    private fun refreshNoiseThreshold() {
+        noiseThresholdDb = (
+            config.optJSONObject(WidgetContract.SLOT_NOISE)
+                ?.optInt("thresholdDb", WidgetContract.NOISE_THRESHOLD_DEFAULT)
+                ?: WidgetContract.NOISE_THRESHOLD_DEFAULT
+            ).coerceIn(WidgetContract.NOISE_THRESHOLD_MIN, WidgetContract.NOISE_THRESHOLD_MAX)
+    }
+
+    /**
+     * Read raw PCM and convert RMS to the same 0-100 scale the JS fallback produces
+     * (dBFS + 100), so a given threshold means the same thing whichever path is
+     * running. Without that alignment the same habit would accrue differently with the
+     * app open and closed, which is exactly the class of bug this rewrite removes.
+     *
+     * The scale is not SPL — there is no calibrated reference — so the numbers are only
+     * meaningful relative to each other. That is why the threshold is measured from the
+     * user's own room rather than shipped as a universal constant.
+     */
     private fun startNoise() {
         if (noiseThreadRunning) return
         if (!hasPermission(Manifest.permission.RECORD_AUDIO)) {
@@ -1024,6 +1153,13 @@ class SensorForegroundService : Service(), SensorEventListener {
                 record.startRecording()
                 val buffer = ShortArray(max(1, bufSize / 2))
                 var lastAccrualMs = System.currentTimeMillis()
+                // Loudest reading since the last second boundary. A second is many
+                // buffers, and one of them being quiet does not make the second quiet:
+                // averaging would let a short bark hide inside an otherwise still
+                // second and still be banked as silence. Taking the peak means the
+                // habit can only be satisfied by a second that was quiet throughout.
+                var peakDb = 0
+                var peakSeen = false
 
                 while (noiseThreadRunning) {
                     val read = record.read(buffer, 0, buffer.size)
@@ -1035,7 +1171,16 @@ class SensorForegroundService : Service(), SensorEventListener {
                         }
                         val rms = sqrt(sum / read)
                         val dbfs = if (rms > 0.0) 20.0 * log10(rms / 32767.0) else -100.0
-                        currentDb = (dbfs + 100.0).coerceIn(0.0, 100.0).toInt()
+                        val db = (dbfs + 100.0).coerceIn(0.0, 100.0).toInt()
+                        // Published immediately so the meter tracks the room rather
+                        // than the second boundary: this is the number the user waves
+                        // a hand at to check the microphone is really live.
+                        currentDb = db
+                        haveDbReading = true
+                        if (!peakSeen || db > peakDb) {
+                            peakDb = db
+                            peakSeen = true
+                        }
                     }
 
                     // Accrue in wall-clock seconds rather than per buffer, so the
@@ -1044,18 +1189,22 @@ class SensorForegroundService : Service(), SensorEventListener {
                     val elapsed = ((now - lastAccrualMs) / 1000L).toInt()
                     if (elapsed >= 1) {
                         lastAccrualMs = now
-                        val threshold = config
-                            .optJSONObject(WidgetContract.SLOT_NOISE)
-                            ?.optInt("thresholdDb", 45) ?: 45
-                        // currentDb == 0 means "no reading yet", not silence.
-                        if (currentDb > 0 && currentDb < threshold) {
-                            noiseSeconds += elapsed
-                            // The silence timer is the one number a user sits and
-                            // watches, so it must move without waiting for the minute
-                            // tick. Hand off to the main thread: everything else
-                            // persists and publishes from there.
-                            handler.post { onNoiseAccrued() }
-                        }
+                        // Snapshotted into vals before the post. Kotlin captures a
+                        // `var` by reference, so a lambda reading peakDb directly would
+                        // see whatever the next buffer had already overwritten it with.
+                        val peak = if (peakSeen) peakDb else -1
+                        val seconds = elapsed
+                        peakDb = 0
+                        peakSeen = false
+                        // The counters are settled on the main thread, not here. They
+                        // are also written by rollDayIfNeeded and read by publish and
+                        // persistCounters, all of which run on the main thread — doing
+                        // the arithmetic on this one left a window where midnight's
+                        // reset and a second's accrual could each lose the other.
+                        // Posting every second, quiet or not: the timer and the level
+                        // are both numbers a user sits and watches, so neither may wait
+                        // for the minute tick.
+                        handler.post { onNoiseSecond(peak, seconds) }
                     }
                 }
             } catch (e: Exception) {
@@ -1078,6 +1227,12 @@ class SensorForegroundService : Service(), SensorEventListener {
         noiseThreadRunning = false
         noiseThread = null
         currentDb = 0
+        haveDbReading = false
+        // Stopping the microphone ends whatever run was in progress, but it is not a
+        // breach: the user chose to stop, and charging them for it would make pausing
+        // look like failing.
+        quietStreakSeconds = 0
+        publishThrottled()
     }
 
     // -----------------------------------------------------------------------
@@ -1314,7 +1469,7 @@ class SensorForegroundService : Service(), SensorEventListener {
 
         slot(WidgetContract.SLOT_PEDOMETER, steps.toDouble(), stepNote(), today)
         slot(WidgetContract.SLOT_MOVEMENT, steps.toDouble(), stepNote(), today)
-        slot(WidgetContract.SLOT_GPS, distanceMeters / 1000.0, "", today)
+        slot(WidgetContract.SLOT_GPS, distanceMeters / 1000.0, gpsNote(), today)
         slot(WidgetContract.SLOT_NOISE, noiseSeconds.toDouble(), noiseNote(), today)
         // The sunset window straddles midnight, so its overlay is stamped with the
         // evening the window opened, matching SensorWidgetRenderer.habitDate.
@@ -1345,7 +1500,20 @@ class SensorForegroundService : Service(), SensorEventListener {
             put("activity", activity)
             put("noise", currentDb)
             put("noiseSeconds", noiseSeconds)
+            // The three facts that turn a running total into an account of the day:
+            // whether the reading means anything, how long the current run of quiet
+            // is, and how many runs were broken. The threshold travels too so the
+            // habit screen draws its marker where the service actually put it,
+            // including the clamp, rather than re-deriving it from the habit.
+            put("noiseListening", noiseThreadRunning)
+            put("noiseHasReading", haveDbReading)
+            put("noiseStreakSeconds", quietStreakSeconds)
+            put("noiseBreaches", noiseBreaches)
+            put("noiseThresholdDb", noiseThresholdDb)
             put("distanceMeters", distanceMeters)
+            // Why the metres are still zero, if they are. The habit screen turns this
+            // into something the user can act on instead of a silent flat line.
+            put("gpsNote", gpsNote())
             put("sunsetMinutes", sunsetMinutes)
             put("sunsetUnlocks", unlocks)
             put("sunsetSource", sunsetSource)
@@ -1371,7 +1539,42 @@ class SensorForegroundService : Service(), SensorEventListener {
 
     private fun stepNote(): String = if (usingHardwareSteps) "" else "ESTIMATED"
 
-    private fun noiseNote(): String = if (currentDb > 0) "$currentDb dB NOW" else ""
+    /**
+     * The one line the silence widget gets, so spend it saying whether the clock is
+     * moving and why.
+     *
+     * A bare "38 dB NOW" left the widget unable to answer the only question a stalled
+     * silence timer raises — is the microphone dead, or is the room simply too loud?
+     * Naming the threshold in the second case also makes the number actionable: it is
+     * the value the calibration control on the habit screen changes.
+     */
+    private fun noiseNote(): String {
+        if (!wantsNoise()) return ""
+        if (!noiseThreadRunning) return "MIC OFF"
+        if (!haveDbReading) return "LISTENING"
+        val threshold = noiseThresholdDb
+        return if (currentDb <= threshold) "$currentDb dB · BANKING"
+        else "$currentDb dB · OVER $threshold"
+    }
+
+    /**
+     * The one line the distance widget gets when the metres are not moving.
+     *
+     * Zero metres has four quite different causes — permission refused, the system
+     * location toggle off, no provider at all, or no fix yet — and they used to be
+     * indistinguishable from a broken app. Empty once a fix has landed, so a genuine
+     * walk is never annotated.
+     */
+    private fun gpsNote(): String {
+        if (!wantsLocation()) return ""
+        return when (locationBlockedReason) {
+            WidgetContract.GPS_BLOCKED_PERMISSION -> "LOCATION NOT ALLOWED"
+            WidgetContract.GPS_BLOCKED_PROVIDER_OFF -> "LOCATION SWITCHED OFF"
+            WidgetContract.GPS_BLOCKED_NO_PROVIDER -> "NO LOCATION SOURCE"
+            WidgetContract.GPS_BLOCKED_NO_FIX -> "WAITING FOR A FIX"
+            else -> ""
+        }
+    }
 
     private fun sunsetNote(): String {
         val cfg = config.optJSONObject(WidgetContract.SLOT_SCREEN) ?: return ""

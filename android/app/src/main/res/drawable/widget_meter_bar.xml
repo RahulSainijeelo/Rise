@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The sensor widgets' progress meter.
+
+  Separate from widget_progress_bar rather than a change to it: that drawable is
+  shared with the task and habit-list widgets, and a restyle aimed at these five
+  should not silently redraw those.
+
+  Fully rounded caps and a 3dp radius on a 6dp bar, so a nearly-empty meter still
+  shows as a deliberate mark instead of a one-pixel smear — the first few hundred
+  steps of a ten-thousand step goal are exactly when a user most needs to see that
+  something is being counted.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:id="@android:id/background">
+        <shape android:shape="rectangle">
+            <solid android:color="#1A1A1A" />
+            <corners android:radius="3dp" />
+        </shape>
+    </item>
+    <item android:id="@android:id/progress">
+        <clip>
+            <shape android:shape="rectangle">
+                <solid android:color="#FFFFFF" />
+                <corners android:radius="3dp" />
+            </shape>
+        </clip>
+    </item>
+</layer-list>

@@ -32,6 +32,21 @@ object WidgetContract {
     const val KEY_PINNED_HABIT_ID = "pinnedHabitId"
     const val KEY_PINNED_HABIT_TITLE = "pinnedHabitTitle"
 
+    /** The label every task widget falls back to when nothing is chosen. */
+    const val LABEL_ALL = "All"
+
+    /**
+     * Whether this widget instance is currently showing its label list instead
+     * of its task list. Per widget id, because two task widgets on the same
+     * screen should not both flip when one is tapped.
+     *
+     * The picker is drawn *inside* the widget on purpose: routing it through a
+     * transparent activity meant a cold app launch just to change a filter,
+     * which is the one thing a home-screen filter should never need.
+     */
+    @JvmStatic
+    fun labelPickerKey(appWidgetId: Int) = "labelPickerOpen_$appWidgetId"
+
     /** Written by JS. The authoritative habit state for the sensor widgets. */
     const val KEY_SENSOR_DATA = "sensorData"
 
@@ -66,6 +81,54 @@ object WidgetContract {
     /** The ring palette picked in the app tab; the widget ring uses the same one. */
     const val KEY_FOCUS_THEME = "focusTheme"
 
+    // -- Habit timers -----------------------------------------------------
+    // A TIMER habit used to be counted by a setInterval on the detail screen, which
+    // meant the clock only advanced while that screen was mounted and lost the run
+    // whenever the app was backgrounded. These carry the same deadline state the
+    // Focus Timer does, keyed by habit id, so a run survives the app being closed.
+
+    /** habitId -> the HT_F_* fields below. One JSON object for every habit. */
+    const val KEY_HABIT_TIMERS = "habitTimers"
+
+    const val HT_MODE_IDLE = "idle"
+    const val HT_MODE_RUNNING = "running"
+    const val HT_MODE_PAUSED = "paused"
+
+    const val HT_F_MODE = "mode"
+    const val HT_F_DURATION = "durationMs"
+    const val HT_F_ENDS_AT = "endsAt"
+    const val HT_F_REMAINING = "remainingMs"
+    const val HT_F_STARTED_AT = "startedAt"
+    /**
+     * Millis of this run already banked into the habit's progress.
+     *
+     * Progress is credited as a *delta* through the pending-op queue, so without a
+     * high-water mark a pause followed by a resume followed by another pause would
+     * bank the first stretch twice.
+     */
+    const val HT_F_CREDITED = "creditedMs"
+    /** The habit-day the run belongs to. A run left over from yesterday is dropped. */
+    const val HT_F_DATE = "date"
+
+    /**
+     * Every habit the app knows about, for the wrapper widget to bind to. The
+     * sensor slots in KEY_SENSOR_DATA only cover the five built-ins; this is the
+     * same field set for the rest.
+     */
+    const val KEY_HABITS_DATA = "habitsData"
+
+    /** Which habit a wrapper widget instance is showing, or absent for unbound. */
+    @JvmStatic
+    fun habitLinkKey(appWidgetId: Int) = "habitLink_$appWidgetId"
+
+    /**
+     * Whether this wrapper widget instance is currently showing its habit list
+     * instead of its bound habit. Per widget id, for the same reason
+     * [labelPickerKey] is: two wrapper widgets on one screen must not both flip.
+     */
+    @JvmStatic
+    fun habitPickerKey(appWidgetId: Int) = "habitPickerOpen_$appWidgetId"
+
     // -- Native-private runtime state -------------------------------------
     // Only SensorForegroundService reads or writes these. They are kept in the
     // same prefs file so a single clear() wipes everything.
@@ -82,6 +145,14 @@ object WidgetContract {
     /** Seconds of accrued silence today. */
     const val KEY_NOISE_SECONDS = "nativeNoiseSeconds"
     const val KEY_NOISE_DATE = "nativeNoiseDate"
+    /**
+     * How many times the room went loud today after a real stretch of quiet.
+     *
+     * Banked with the seconds because it is the other half of the same claim: "40
+     * minutes of quiet" means something different across two breaks than across
+     * thirty, and a timer that only ever counts up cannot say which happened.
+     */
+    const val KEY_NOISE_BREACHES = "nativeNoiseBreaches"
     /** Metres walked/ridden today. */
     const val KEY_GPS_METERS = "nativeGpsMeters"
     const val KEY_GPS_DATE = "nativeGpsDate"
@@ -135,6 +206,51 @@ object WidgetContract {
     const val SLOT_SCREEN = "screen"
 
     val ALL_SLOTS = listOf(SLOT_PEDOMETER, SLOT_GPS, SLOT_NOISE, SLOT_MOVEMENT, SLOT_SCREEN)
+
+    /**
+     * Why a distance habit is not accruing metres.
+     *
+     * Zero metres has four unrelated causes and they used to be indistinguishable
+     * from a broken app: the service logged its bail to logcat and every surface went
+     * on drawing a confident 0.0 KM. These are the reasons, carried out to the widget
+     * as a note and to JS as `gpsNote` so the flat line can explain itself.
+     *
+     * Internal to the native side — the strings JS sees are the finished note, not
+     * these keys — so there is deliberately no TS mirror to keep in step.
+     */
+    const val GPS_BLOCKED_PERMISSION = "permission"
+    const val GPS_BLOCKED_PROVIDER_OFF = "providerOff"
+    const val GPS_BLOCKED_NO_PROVIDER = "noProvider"
+    const val GPS_BLOCKED_NO_FIX = "noFix"
+
+    /**
+     * Ambient level, on the 0-100 scale below, at or under which Deep Silence counts
+     * a second as quiet. Used whenever the habit has not been calibrated; the user's
+     * own value arrives in the noise slot's `thresholdDb`.
+     *
+     * Must match NOISE_THRESHOLD_DEFAULT in the TS contract, or the same habit would
+     * accrue differently with the app open and closed.
+     */
+    const val NOISE_THRESHOLD_DEFAULT = 45
+
+    /**
+     * The floor and ceiling a calibrated threshold is clamped to.
+     *
+     * Below 20 nothing but an anechoic chamber ever counts, and the habit becomes
+     * impossible; above 80 a vacuum cleaner counts as silence, and it becomes
+     * meaningless. Both ends are failure modes a slider can reach by accident.
+     */
+    const val NOISE_THRESHOLD_MIN = 20
+    const val NOISE_THRESHOLD_MAX = 80
+
+    /**
+     * How long the room must stay quiet before going loud counts as a breach.
+     *
+     * A cough is not a broken silence. Without this a single transient would bank a
+     * breach, and the count that is meant to say "you settled twice" would instead
+     * say "you cleared your throat forty times".
+     */
+    const val NOISE_BREACH_MIN_QUIET_SECONDS = 20
 
     /** Metadata keys inside the sensorData object are prefixed with '_' and are not slots. */
     const val META_KEY = "_meta"
@@ -209,6 +325,19 @@ object WidgetContract {
     const val CTRL_TRACK = "track"
     const val CTRL_REFRESH = "refresh"
 
+    /**
+     * Start / pause a TIMER habit's run. One button, because the label reads out
+     * the state it is in and there is never room on a widget for two.
+     *
+     * Like CTRL_TRACK this is not a habit mutation, so opForControl returns null:
+     * the run is state, and only the seconds it produces become progress. See
+     * HabitTimer, which credits them through OP_TIMER_ADD as it goes.
+     */
+    const val CTRL_RUN = "run"
+
+    /** Throw away the rest of a TIMER habit's run, keeping what it already earned. */
+    const val CTRL_RESET = "reset"
+
     /** Label drawn on each control button. */
     @JvmStatic
     fun controlLabel(control: String, step: Double, displayMode: String): String = when (control) {
@@ -220,7 +349,22 @@ object WidgetContract {
         CTRL_SLIPPED -> "✕ SLIPPED"
         CTRL_TRACK -> trackLabel(true)
         CTRL_REFRESH -> "↻"
+        CTRL_RUN -> runLabel(HT_MODE_IDLE)
+        CTRL_RESET -> "↺ RESET"
         else -> control.uppercase()
+    }
+
+    /**
+     * The run button reads out what tapping it will do, unlike [trackLabel], which
+     * reads out the state. A countdown already shows its own state in the digits
+     * next to the button, so repeating it there would waste the only wide row a
+     * widget has.
+     */
+    @JvmStatic
+    fun runLabel(mode: String): String = when (mode) {
+        HT_MODE_RUNNING -> "❙❙ PAUSE"
+        HT_MODE_PAUSED -> "▶ RESUME"
+        else -> "▶ START"
     }
 
     /**
@@ -257,6 +401,8 @@ object WidgetContract {
         CTRL_TIMER -> OP_TIMER_ADD
         CTRL_CONFIRM -> OP_SUNSET_CONFIRM
         CTRL_SLIPPED -> OP_SUNSET_SLIPPED
+        // CTRL_RUN and CTRL_RESET are missing on purpose: they move the timer's
+        // state machine, and HabitTimer enqueues the seconds that fall out of it.
         else -> null
     }
 
@@ -325,6 +471,26 @@ object WidgetContract {
      * without launching Rise.
      */
     const val ACTION_FOCUS_CONTROL = "com.rise.FOCUS_CONTROL"
+
+    /**
+     * A TIMER habit's run button was tapped, or its deadline passed.
+     * Extras: EXTRA_HABIT_ID, EXTRA_OP (one of the HT_OP_* values), EXTRA_TOKEN.
+     */
+    const val ACTION_HABIT_TIMER = "com.rise.HABIT_TIMER"
+
+    const val HT_OP_START = "start"
+    const val HT_OP_PAUSE = "pause"
+    const val HT_OP_RESUME = "resume"
+    const val HT_OP_RESET = "reset"
+    /** Fired by the safety-net alarm; settles a run whose deadline has passed. */
+    const val HT_OP_EXPIRE = "expire"
+    /** One button on the widget: start, pause or resume, whichever applies. */
+    const val HT_OP_TOGGLE = "toggle"
+
+    /** Bind a wrapper widget to a habit. Extras: EXTRA_HABIT_ID, EXTRA_APPWIDGET_ID. */
+    const val ACTION_LINK_HABIT = "com.rise.LINK_HABIT"
+    /** Open the wrapper widget's own habit picker. Extra: EXTRA_APPWIDGET_ID. */
+    const val ACTION_PICK_HABIT = "com.rise.PICK_HABIT"
 
     const val EXTRA_OP = "extra_op"
     const val EXTRA_HABIT_ID = "extra_habit_id"

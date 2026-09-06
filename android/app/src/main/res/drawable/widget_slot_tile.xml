@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Tile behind a slot's icon in the widget header.
+
+  The icon used to float on the background with nothing holding it, which read as
+  a stray glyph rather than an identifier. Giving it a frame is what turns it into
+  a badge — the one element that tells five otherwise identical widgets apart at a
+  glance on a crowded home screen.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#141414" />
+    <corners android:radius="10dp" />
+    <stroke android:width="1dp" android:color="#2A2A2A" />
+</shape>

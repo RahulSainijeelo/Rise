@@ -326,6 +326,15 @@ export const HabitsScreenStyles = StyleSheet.create({
         alignItems: 'center',
         marginBottom: 12,
     },
+    typeHeaderRow: {
+        flexDirection: 'row',
+        alignItems: 'baseline',
+        justifyContent: 'space-between',
+        marginBottom: 12,
+    },
+    typeHint: {
+        letterSpacing: 1,
+    },
     typeRow: {
         flexDirection: 'row',
         gap: 12,
@@ -335,9 +344,21 @@ export const HabitsScreenStyles = StyleSheet.create({
         flex: 1,
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 12,
+        justifyContent: 'center',
+        paddingVertical: 12,
+        paddingHorizontal: 8,
         borderRadius: 12,
         borderWidth: 1,
+    },
+    typeBtnLabel: {
+        marginLeft: 6,
+        letterSpacing: 1,
+    },
+    // The dot-matrix face is the app's signature, so the selected chip is the
+    // one place in the row that gets to wear it.
+    typeBtnLabelActive: {
+        fontFamily: 'ndot',
+        letterSpacing: 2,
     },
     // Tab Styles
     tabContainer: {

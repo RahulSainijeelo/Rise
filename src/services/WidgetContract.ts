@@ -36,6 +36,13 @@ export const PREF_KEYS = {
     /** SensorWidgetPayload. Written by JS, read by every sensor widget. */
     sensorData: 'sensorData',
     /**
+     * Every habit without a dedicated widget, as a list, for HabitLinkWidget to
+     * bind one instance to one habit. Same field set as a sensor slot.
+     */
+    habitsData: 'habitsData',
+    /** habitId -> deadline state for TIMER habits. Written and read by native. */
+    habitTimers: 'habitTimers',
+    /**
      * Live values written by SensorForegroundService while the app is closed.
      * The renderer overlays this on top of sensorData so widgets stay live
      * without a JS bridge. Native writes, JS reads on foreground to reconcile.
@@ -79,6 +86,25 @@ export const TEMPLATE_SLOT: Record<string, SensorSlot> = {
     digital_sunset: 'screen',
 };
 
+/**
+ * The slot a habit occupies, or null if it occupies none.
+ *
+ * templateId first, sensorType second, and every layer must ask this rather than
+ * reading either field directly. They used to disagree: the widgets bound slot to
+ * habit by templateId while the native sensor config, the store commit and the
+ * foreground fallback all matched on sensorType. A habit carrying one and not the
+ * other therefore got a fully rendered widget and no sensor wiring whatsoever — no
+ * permission request, no readings, no commits. That is exactly how City Glider ended
+ * up showing a distance widget whose metres never moved.
+ */
+export const habitSlot = (habit: any): SensorSlot | null => {
+    const byTemplate = habit?.templateId ? TEMPLATE_SLOT[habit.templateId] : undefined;
+    if (byTemplate) return byTemplate;
+    return (SENSOR_SLOTS as readonly string[]).includes(habit?.sensorType)
+        ? (habit.sensorType as SensorSlot)
+        : null;
+};
+
 /** How the widget should format `progress` and `goal` for display. */
 export type WidgetDisplayMode =
     | 'int'       // 8412 STEPS
@@ -94,8 +120,11 @@ export type WidgetDisplayMode =
  * slot's sensor on or off. Steps, distance and movement are measured rather than
  * entered, so they offer 'track' *instead of* dec/inc — hand-editing a number the
  * sensor overwrites on its next reading was never meaningful.
+ *
+ * 'run' and 'reset' are odd in the same way: they move a TIMER habit's countdown,
+ * and only the seconds it actually runs for become progress. See HabitTimer.kt.
  */
-export const WIDGET_CONTROLS = ['dec', 'inc', 'check', 'timer', 'confirm', 'slipped', 'track', 'refresh'] as const;
+export const WIDGET_CONTROLS = ['dec', 'inc', 'check', 'timer', 'confirm', 'slipped', 'track', 'refresh', 'run', 'reset'] as const;
 export type WidgetControl = (typeof WIDGET_CONTROLS)[number];
 
 export interface SensorSlotPayload {
@@ -215,6 +244,8 @@ export const CONTROL_OP: Record<WidgetControl, PendingOpName | null> = {
     slipped: 'sunsetSlipped',
     track: null,          // flips TrackingState natively, never a habit mutation
     refresh: null,        // pure redraw, no state change
+    run: null,            // moves HabitTimer; the seconds arrive as timerAdd ops
+    reset: null,          // ditto — abandons the countdown, keeps what it earned
 };
 
 // ---------------------------------------------------------------------------
@@ -330,6 +361,35 @@ export const SUNSET_DEFAULTS = {
 } as const;
 
 export type SunsetVerification = 'usagestats' | 'unlocks' | 'manual';
+
+/**
+ * Deep Silence's tuning, mirrored in WidgetContract.kt.
+ *
+ * The scale is dBFS + 100 clamped to 0-100, which is what both the native
+ * AudioRecord path and the JS fallback produce. It is not SPL — there is no
+ * calibrated reference — so the numbers are only meaningful relative to each other,
+ * which is precisely why the threshold has to be set by measuring the user's own
+ * room rather than shipped as a universal constant.
+ *
+ * If these drift from the Kotlin copy the same habit accrues differently with the
+ * app open and closed, which is the bug the shared constant exists to prevent.
+ */
+export const NOISE_DEFAULTS = {
+    /** Used until the habit is calibrated. */
+    thresholdDb: 45,
+    /**
+     * Clamp for a calibrated threshold. Below the floor only an anechoic chamber
+     * counts and the habit is impossible; above the ceiling a vacuum cleaner counts
+     * and it is meaningless. A slider can reach both ends by accident.
+     */
+    minDb: 20,
+    maxDb: 80,
+    /**
+     * How long quiet must hold before going loud counts as a breach. A cough is not
+     * a broken silence.
+     */
+    breachMinQuietSeconds: 20,
+} as const;
 
 /** Config blob handed to the native service via PREF_KEYS.sensorConfig. */
 export interface SensorConfig {

@@ -147,30 +147,35 @@ object SensorWidgetRenderer {
         R.id.habit_btn_3
     )
 
+    /**
+     * Dot-matrix frames per slot, three to a sequence.
+     *
+     * Named to match the files on disk. They previously read anim_step_f1..f6 and
+     * anim_complete_f1..f6 against assets called anim_step_frame1..3 and
+     * anim_completed_frame1..3 — thirty references to resources that do not exist,
+     * which is an AAPT link failure, so the app could not be built at all. The
+     * flipper still holds six views; applySequence indexes modulo the sequence
+     * length, so it simply plays the three-frame loop twice per pass.
+     */
     private val SEQUENCES: Map<String, IntArray> = mapOf(
         "step" to intArrayOf(
-            R.drawable.anim_step_f1, R.drawable.anim_step_f2, R.drawable.anim_step_f3,
-            R.drawable.anim_step_f4, R.drawable.anim_step_f5, R.drawable.anim_step_f6
+            R.drawable.anim_step_frame1, R.drawable.anim_step_frame2, R.drawable.anim_step_frame3
         ),
         "glider" to intArrayOf(
-            R.drawable.anim_glider_f1, R.drawable.anim_glider_f2, R.drawable.anim_glider_f3,
-            R.drawable.anim_glider_f4, R.drawable.anim_glider_f5, R.drawable.anim_glider_f6
+            R.drawable.anim_glider_frame1, R.drawable.anim_glider_frame2, R.drawable.anim_glider_frame3
         ),
         "silence" to intArrayOf(
-            R.drawable.anim_silence_f1, R.drawable.anim_silence_f2, R.drawable.anim_silence_f3,
-            R.drawable.anim_silence_f4, R.drawable.anim_silence_f5, R.drawable.anim_silence_f6
+            R.drawable.anim_silence_frame1, R.drawable.anim_silence_frame2, R.drawable.anim_silence_frame3
         ),
         "movement" to intArrayOf(
-            R.drawable.anim_movement_f1, R.drawable.anim_movement_f2, R.drawable.anim_movement_f3,
-            R.drawable.anim_movement_f4, R.drawable.anim_movement_f5, R.drawable.anim_movement_f6
+            R.drawable.anim_movement_frame1, R.drawable.anim_movement_frame2, R.drawable.anim_movement_frame3
         ),
         "sunset" to intArrayOf(
-            R.drawable.anim_sunset_f1, R.drawable.anim_sunset_f2, R.drawable.anim_sunset_f3,
-            R.drawable.anim_sunset_f4, R.drawable.anim_sunset_f5, R.drawable.anim_sunset_f6
+            R.drawable.anim_sunset_frame1, R.drawable.anim_sunset_frame2, R.drawable.anim_sunset_frame3
         ),
         "complete" to intArrayOf(
-            R.drawable.anim_complete_f1, R.drawable.anim_complete_f2, R.drawable.anim_complete_f3,
-            R.drawable.anim_complete_f4, R.drawable.anim_complete_f5, R.drawable.anim_complete_f6
+            R.drawable.anim_completed_frame1, R.drawable.anim_completed_frame2,
+            R.drawable.anim_completed_frame3
         )
     )
 
@@ -263,10 +268,18 @@ object SensorWidgetRenderer {
 
         // Fixed 0..100 scale so the bar means the same thing in every widget,
         // including inverse goals where "full" is bad news.
-        views.setProgressBar(
-            R.id.habit_progress, 100,
-            WidgetContract.progressPercent(progress, goal, direction), false
-        )
+        val percent = WidgetContract.progressPercent(progress, goal, direction)
+        views.setProgressBar(R.id.habit_progress, 100, percent, false)
+
+        // The header figure. Shown only when there is a goal to be a fraction of:
+        // "0%" against a goal of zero is not a measurement, and a habit with no goal
+        // is being counted, not scored.
+        if (goal > 0) {
+            views.setTextViewText(R.id.habit_percent, "$percent%")
+            views.setTextColor(R.id.habit_percent, if (completed) COLOR_DONE else COLOR_MUTED)
+        } else {
+            views.setTextViewText(R.id.habit_percent, "")
+        }
 
         val badge = WidgetContract.statusBadge(slot)
         views.setTextViewText(R.id.habit_status_badge, badge)

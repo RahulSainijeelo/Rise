@@ -105,10 +105,14 @@ const applyCompletion = (completedDates: string[], date: string, reached: boolea
 };
 
 /**
- * One-time backfill for habits saved before `templateId` existed.
+ * Reconciles every saved habit against its template on load.
  *
- * Title matching is only acceptable here, at load, as a migration. It must never
- * be used for runtime widget binding — that was the original bug.
+ * Two jobs. It backfills `templateId` for habits saved before that field existed —
+ * title matching is only acceptable here, at load, as a migration, and must never
+ * be used for runtime widget binding, which was the original bug. And it repairs
+ * the sensor wiring of habits that already have a templateId, because a stale or
+ * missing `sensorType` unbinds a habit from its sensor while leaving its widget
+ * looking perfectly healthy.
  *
  * Also repairs the sensor habits whose templates had no usable goal: Digital
  * Sunset was a bare 'check' with no goal, target time or allowance, and
@@ -120,18 +124,43 @@ const migrateHabits = (habits: Habit[]): Habit[] => {
     const templates: any[] = COMMON_HABITS_TEMPLATES;
 
     return habits.map((h) => {
-        if (h.templateId) return h;
+        /*
+          Bind by id when the habit has one, and fall back to the title only as the
+          original migration for habits saved before templateId existed.
 
-        const match = templates.find((t) =>
-            t.title.toLowerCase() === (h.title || '').toLowerCase()
-        );
+          A habit that already carries a templateId used to return early here, which
+          was wrong: its sensor wiring still has to be reconciled against the template
+          on every load. Widgets bind slot to habit by templateId, while the native
+          sensor config, the store commit and the foreground fallback all matched on
+          sensorType, so a habit carrying a templateId and a missing or stale
+          sensorType got a perfectly rendered widget and no sensor behind it — no
+          permission request, no readings, no commits. City Glider showed a distance
+          widget whose metres never moved for exactly this reason, and the early
+          return is what kept it broken across every launch.
+        */
+        const match = h.templateId
+            ? templates.find((t) => t.id === h.templateId)
+            : templates.find((t) => t.title.toLowerCase() === (h.title || '').toLowerCase());
         if (!match) return h;
 
         const next: Habit = { ...h, templateId: match.id };
 
-        // Adopt the template's sensor wiring if the habit predates it.
-        if (next.isSensorBased === undefined) next.isSensorBased = match.isSensorBased;
-        if (!next.sensorType) next.sensorType = match.sensorType;
+        /*
+          Sensor wiring. The slot fields are *corrected*, not merely filled in,
+          because a wrong sensorType silently unbinds the habit from its sensor.
+          Everything below this block stays fill-if-absent so a habit the user has
+          customised keeps their goal, unit and window.
+
+          Repairing isSensorBased cannot re-enable a sensor someone switched off:
+          pausing goes through setSlotTracking on the native service and lands in
+          TrackingState, never in this flag.
+        */
+        if (match.isSensorBased) {
+            if (next.sensorType !== match.sensorType) next.sensorType = match.sensorType;
+            if (!next.isSensorBased) next.isSensorBased = true;
+        } else if (next.isSensorBased === undefined) {
+            next.isSensorBased = match.isSensorBased;
+        }
         if (!next.requiredPermissions) next.requiredPermissions = match.requiredPermissions;
         if (next.noiseThresholdDb === undefined) next.noiseThresholdDb = match.noiseThresholdDb;
 

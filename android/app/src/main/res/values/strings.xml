@@ -47,4 +47,14 @@
     <string name="focus_action_reset">RESET</string>
     <string name="focus_done_title">Focus complete</string>
     <string name="focus_done_text">%1$s of focus. Logged to your history.</string>
+
+    <!-- Habit timers -->
+    <string name="habit_timer_channel_name">Habit timer</string>
+    <string name="habit_timer_channel_desc">Alerts you the moment a timed habit finishes.</string>
+    <string name="habit_timer_done_text">%1$s done. Logged to today.</string>
+    <string name="habit_timer_done_fallback">Timer complete</string>
+
+    <!-- Habit widget (wrapper) -->
+    <string name="habit_link_widget_label">Rise: Habit</string>
+    <string name="habit_link_widget_desc">One habit of your choosing, with its controls.</string>
 </resources>

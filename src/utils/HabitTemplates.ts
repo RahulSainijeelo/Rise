@@ -1,3 +1,5 @@
+import { NOISE_DEFAULTS } from '../services/WidgetContract';
+
 export type SensorType = 'pedometer' | 'screen' | 'noise' | 'movement' | 'gps';
 /**
  * 'atLeast' (default) — you win by reaching the goal.
@@ -191,7 +193,11 @@ export const COMMON_HABITS_TEMPLATES: HabitTemplate[] = [
         icon: 'VolumeX',
         goal: 3600, // 1 hour
         unit: 'seconds',
-        noiseThresholdDb: 45,
+        // A starting point, not a setting. The scale is dBFS + 100, which is not
+        // calibrated to anything, so the same room reads differently on different
+        // handsets — the habit screen's CALIBRATE ROOM control is what makes this
+        // number mean something for a given phone and a given desk.
+        noiseThresholdDb: NOISE_DEFAULTS.thresholdDb,
         isSensorBased: true,
         sensorType: 'noise',
         requiredPermissions: ['android.permission.RECORD_AUDIO', 'ios.permission.MICROPHONE'],

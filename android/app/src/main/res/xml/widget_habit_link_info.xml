@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Sizing for the wrapper widget.
+
+  Two cells wide by two tall at the usual 70dp-per-cell reckoning. It has to hold a
+  value, a progress bar and a row of up to three buttons, and narrower than 110dp the
+  buttons ellipsize their labels away to nothing. It also hosts the habit picker, which
+  is a scrolling list, so it is resizable in both directions — a taller instance simply
+  shows more habits to choose from.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:initialLayout="@layout/widget_habit_link"
+    android:minWidth="110dp"
+    android:minHeight="110dp"
+    android:minResizeWidth="110dp"
+    android:minResizeHeight="110dp"
+    android:updatePeriodMillis="86400000"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen"
+    android:previewImage="@drawable/widget_icon_habits"
+    android:description="@string/habit_link_widget_desc">
+</appwidget-provider>

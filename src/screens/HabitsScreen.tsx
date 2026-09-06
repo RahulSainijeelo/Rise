@@ -14,6 +14,26 @@ import { useNavigation } from '@react-navigation/native';
 import { HabitsScreenStyles as styles } from '../styles/Habit.styles';
 import { COMMON_HABITS_TEMPLATES, HabitTemplate, habitFromTemplate } from '../utils/HabitTemplates';
 
+type NewHabitType = 'check' | 'timer' | 'numeric';
+
+/**
+ * The stored vocabulary and the spoken one disagree: a habit the user calls a
+ * COUNT is stored as `'numeric'`. Keeping the mapping in one table stops that
+ * mismatch from being re-derived at three separate call sites.
+ */
+const HABIT_TYPES: { key: NewHabitType; Icon: typeof Check; label: string }[] = [
+    { key: 'check', Icon: Check, label: 'CHECK' },
+    { key: 'numeric', Icon: TrendingUp, label: 'COUNT' },
+    { key: 'timer', Icon: Timer, label: 'TIMER' },
+];
+
+/** One line of plain English so the selected chip explains itself. */
+const TYPE_HINT: Record<NewHabitType, string> = {
+    check: 'DONE OR NOT DONE',
+    numeric: 'COUNT TOWARDS A NUMBER',
+    timer: 'RUN A CLOCK',
+};
+
 export const HabitsScreen = () => {
     const route = useRoute<any>();
     const navigation = useNavigation<any>();
@@ -396,31 +416,47 @@ export const HabitsScreen = () => {
                                 ))}
                             </View>
 
-                            <NothingText variant="bold" size={14} style={{ marginBottom: 12 }}>GOAL TYPE</NothingText>
+                            <View style={styles.typeHeaderRow}>
+                                <NothingText variant="bold" size={14}>GOAL TYPE</NothingText>
+                                <NothingText size={10} color={theme.colors.textSecondary} style={styles.typeHint}>
+                                    {TYPE_HINT[newType]}
+                                </NothingText>
+                            </View>
                             <View style={styles.typeRow}>
-                                <TouchableOpacity
-                                    style={[styles.typeBtn, newType === 'check' && { borderColor: theme.colors.text, backgroundColor: theme.colors.text + '10' }, { borderColor: theme.colors.border }]}
-                                    onPress={() => setNewType('check')}
-                                >
-                                    <Check size={18} color={newType === 'check' ? theme.colors.text : theme.colors.textSecondary} />
-                                    <NothingText size={10} style={{ marginLeft: 6 }}>CHECK</NothingText>
-                                </TouchableOpacity>
-
-                                <TouchableOpacity
-                                    style={[styles.typeBtn, newType === 'numeric' && { borderColor: theme.colors.text, backgroundColor: theme.colors.text + '10' }, { borderColor: theme.colors.border }]}
-                                    onPress={() => setNewType('numeric')}
-                                >
-                                    <TrendingUp size={18} color={newType === 'numeric' ? theme.colors.text : theme.colors.textSecondary} />
-                                    <NothingText size={10} style={{ marginLeft: 6 }}>COUNT</NothingText>
-                                </TouchableOpacity>
-
-                                <TouchableOpacity
-                                    style={[styles.typeBtn, newType === 'timer' && { borderColor: theme.colors.text, backgroundColor: theme.colors.text + '10' }, { borderColor: theme.colors.border }]}
-                                    onPress={() => setNewType('timer')}
-                                >
-                                    <Timer size={18} color={newType === 'timer' ? theme.colors.text : theme.colors.textSecondary} />
-                                    <NothingText size={10} style={{ marginLeft: 6 }}>TIMER</NothingText>
-                                </TouchableOpacity>
+                                {HABIT_TYPES.map(({ key, Icon, label }) => {
+                                    const selected = newType === key;
+                                    return (
+                                        <TouchableOpacity
+                                            key={key}
+                                            activeOpacity={0.85}
+                                            onPress={() => setNewType(key)}
+                                            style={[
+                                                styles.typeBtn,
+                                                // Order is load-bearing. The old code put the
+                                                // unselected borderColor *after* the selected
+                                                // one, so the selection never showed a border
+                                                // and the only cue left was a 6% tint.
+                                                { borderColor: theme.colors.border, backgroundColor: 'transparent' },
+                                                selected && {
+                                                    borderColor: theme.colors.text,
+                                                    backgroundColor: theme.colors.text,
+                                                },
+                                            ]}
+                                        >
+                                            <Icon
+                                                size={16}
+                                                color={selected ? theme.colors.background : theme.colors.textSecondary}
+                                            />
+                                            <NothingText
+                                                size={selected ? 12 : 10}
+                                                color={selected ? theme.colors.background : theme.colors.textSecondary}
+                                                style={[styles.typeBtnLabel, selected && styles.typeBtnLabelActive]}
+                                            >
+                                                {label}
+                                            </NothingText>
+                                        </TouchableOpacity>
+                                    );
+                                })}
                             </View>
 
                             {newType === 'numeric' && (

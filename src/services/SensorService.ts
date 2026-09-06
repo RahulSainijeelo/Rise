@@ -4,7 +4,7 @@ import { NativeModules, NativeEventEmitter, Platform } from 'react-native';
 import Geolocation from 'react-native-geolocation-service';
 import RNSoundLevel from 'react-native-sound-level';
 import type { PendingOp, SensorConfig, SensorSlot } from './WidgetContract';
-import { SUNSET_DEFAULTS } from './WidgetContract';
+import { NOISE_DEFAULTS, SUNSET_DEFAULTS, habitSlot } from './WidgetContract';
 
 /**
  * SensorBridge is the native module backed by SensorForegroundService. When it is
@@ -57,7 +57,37 @@ export interface LiveSensorData {
     noise: number;
     /** Seconds of silence accrued today, owned by the service in native mode. */
     noiseSeconds: number;
+    /**
+     * True while the microphone is actually open.
+     *
+     * Distinct from `noise > 0`. A silent room legitimately reads 0, so "0 means the
+     * microphone is not running" was a sentinel the quietest possible conditions
+     * could collide with — and the screen would claim the mic was off in exactly the
+     * moment the habit was going best.
+     */
+    noiseListening: boolean;
+    /** False until the first buffer has been measured; see noiseListening. */
+    noiseHasReading: boolean;
+    /** Seconds of unbroken quiet right now, reset whenever the room goes loud. */
+    noiseStreakSeconds: number;
+    /** How many worthwhile runs of quiet were broken today. */
+    noiseBreaches: number;
+    /**
+     * The threshold the tracker is really using, clamped, as opposed to whatever is
+     * stored on the habit. The meter draws its marker from this so the line the user
+     * sees is the line the accrual actually tests against.
+     */
+    noiseThresholdDb: number;
     distanceMeters: number;
+    /**
+     * Why the metres are not moving, already worded for display, or '' when nothing
+     * is wrong.
+     *
+     * Zero metres has four unrelated causes — permission refused, the system location
+     * toggle off, no provider, or no fix yet — and from the outside they were all the
+     * same confident 0.0 KM with an explanation buried in logcat.
+     */
+    gpsNote: string;
     location: { latitude: number; longitude: number } | null;
     /** Minutes of screen time recorded after the Digital Sunset cutoff. */
     sunsetMinutes: number;
@@ -97,7 +127,13 @@ const EMPTY_LIVE: LiveSensorData = {
     activity: 0,
     noise: 0,
     noiseSeconds: 0,
+    noiseListening: false,
+    noiseHasReading: false,
+    noiseStreakSeconds: 0,
+    noiseBreaches: 0,
+    noiseThresholdDb: NOISE_DEFAULTS.thresholdDb,
     distanceMeters: 0,
+    gpsNote: '',
     location: null,
     sunsetMinutes: 0,
     sunsetUnlocks: 0,
@@ -110,13 +146,45 @@ const EMPTY_LIVE: LiveSensorData = {
 };
 
 /**
+ * The fields screens print as text. Guarded on the way in — see emit().
+ */
+const NUMERIC_LIVE_FIELDS: (keyof LiveSensorData)[] = [
+    'steps',
+    'activity',
+    'noise',
+    'noiseSeconds',
+    'noiseStreakSeconds',
+    'noiseBreaches',
+    'noiseThresholdDb',
+    'distanceMeters',
+    'sunsetMinutes',
+    'sunsetUnlocks',
+];
+
+/**
+ * A threshold that is safe to accrue against.
+ *
+ * Exported because three places need the same answer — the config handed to native,
+ * the JS fallback accrual, and the calibration control on the habit screen — and a
+ * habit carrying an out-of-range value (hand-edited, restored from an older build,
+ * or set by a slider that overshot) must not mean three different behaviours.
+ */
+export const clampNoiseThreshold = (db: number | undefined | null): number => {
+    const n = Number(db);
+    if (!isFinite(n)) return NOISE_DEFAULTS.thresholdDb;
+    return Math.min(NOISE_DEFAULTS.maxDb, Math.max(NOISE_DEFAULTS.minDb, Math.round(n)));
+};
+
+/**
  * Derive the config the native service needs from the current habit list.
  * Exported so WidgetService and the app lifecycle can push it without
  * duplicating the field mapping.
  */
 export const buildSensorConfig = (habits: any[]): SensorConfig => {
     const config: SensorConfig = {};
-    const bySlot = (slot: SensorSlot) => habits.find((h: any) => h.sensorType === slot);
+    // habitSlot, not h.sensorType: the widgets bind by templateId, and a habit whose
+    // sensorType went missing used to get a widget with no sensor behind it.
+    const bySlot = (slot: SensorSlot) => habits.find((h: any) => habitSlot(h) === slot);
 
     const ped = bySlot('pedometer');
     if (ped) config.pedometer = { habitId: ped.id, goal: ped.numericGoal || 0 };
@@ -131,7 +199,7 @@ export const buildSensorConfig = (habits: any[]): SensorConfig => {
     if (noise) {
         config.noise = {
             habitId: noise.id,
-            thresholdDb: noise.noiseThresholdDb ?? 45,
+            thresholdDb: clampNoiseThreshold(noise.noiseThresholdDb),
             goalSeconds: noise.timerGoal || 0,
         };
     }
@@ -160,6 +228,9 @@ class SensorService {
     private stepCooldown = 400; // Minimum 400ms between steps (prevents shaking)
     private isNoiseSensorRunning = false;
     private noiseAccrualTimer: ReturnType<typeof setInterval> | null = null;
+    /** Loudest frame since the accrual interval last looked; see startNoiseSensor. */
+    private noisePeakDb = 0;
+    private noisePeakSeen = false;
 
     private live: LiveSensorData = { ...EMPTY_LIVE };
     private listeners = new Set<(d: LiveSensorData) => void>();
@@ -187,7 +258,22 @@ class SensorService {
     }
 
     private emit(patch: Partial<LiveSensorData>) {
-        this.live = { ...this.live, ...patch };
+        this.live = { ...this.live, ...NUMERIC_LIVE_FIELDS.reduce((clean, key) => {
+            // The chokepoint for every reading that reaches a screen.
+            //
+            // Screens render these straight into text, so one wrongly-shaped value
+            // from native does not misprint a number — it throws "Objects are not
+            // valid as a React child" and takes the whole screen with it. That has
+            // already happened once, when a per-slot overlay object landed in
+            // `noise`. Anything that is not a finite number is dropped here, and the
+            // previous good reading stands.
+            const value = (patch as any)[key];
+            if (value === undefined) return clean;
+            const n = typeof value === 'number' ? value : Number(value);
+            if (isFinite(n)) (clean as any)[key] = n;
+            else delete (clean as any)[key];
+            return clean;
+        }, { ...patch }) };
         this.listeners.forEach(cb => {
             try {
                 cb(this.live);
@@ -286,7 +372,17 @@ class SensorService {
             activity: data.activity ?? this.live.activity,
             noise: data.noise ?? this.live.noise,
             noiseSeconds: data.noiseSeconds ?? this.live.noiseSeconds,
+            // `??` and not `||`: false and 0 are the readings that matter most here —
+            // a microphone that just went off, and a room that has just fallen silent.
+            noiseListening: data.noiseListening ?? this.live.noiseListening,
+            noiseHasReading: data.noiseHasReading ?? this.live.noiseHasReading,
+            noiseStreakSeconds: data.noiseStreakSeconds ?? this.live.noiseStreakSeconds,
+            noiseBreaches: data.noiseBreaches ?? this.live.noiseBreaches,
+            noiseThresholdDb: data.noiseThresholdDb ?? this.live.noiseThresholdDb,
             distanceMeters: data.distanceMeters ?? this.live.distanceMeters,
+            // `??` again, and the empty string matters: '' is the service telling us a
+            // fix landed and the previous complaint no longer applies.
+            gpsNote: data.gpsNote ?? this.live.gpsNote,
             sunsetMinutes: data.sunsetMinutes ?? this.live.sunsetMinutes,
             sunsetUnlocks: data.sunsetUnlocks ?? this.live.sunsetUnlocks,
             sunsetSource: data.sunsetSource ?? this.live.sunsetSource,
@@ -315,10 +411,16 @@ class SensorService {
         habits.forEach((h) => {
             if (!h.isSensorBased) return;
 
+            // The slot, not the raw sensorType: a habit bound to a widget by templateId
+            // must be credited by the same rule the widget was drawn with, or the widget
+            // shows a number the habit never receives.
+            const slot = habitSlot(h);
+            if (!slot) return;
+
             // The Digital Sunset window straddles midnight, so its readings belong
             // to the night that began at the cutoff, not to whatever the calendar
             // says right now.
-            const date = h.sensorType === 'screen' && d.sunsetDate ? d.sunsetDate : today;
+            const date = slot === 'screen' && d.sunsetDate ? d.sunsetDate : today;
 
             // Never overwrite a day the user has already closed out, except for
             // 'atMost' habits where the count must keep rising until the window
@@ -326,18 +428,18 @@ class SensorService {
             const isAtMost = (h.goalDirection || 'atLeast') === 'atMost';
             if (h.completedDates?.includes(date) && !isAtMost) return;
 
-            if (h.sensorType === 'pedometer' || h.sensorType === 'movement') {
+            if (slot === 'pedometer' || slot === 'movement') {
                 const cur = h.numericProgress?.[date] || 0;
                 if (d.steps > cur) state.updateSensorProgress(h.id, date, d.steps);
-            } else if (h.sensorType === 'gps') {
+            } else if (slot === 'gps') {
                 const km = d.distanceMeters / 1000;
                 const cur = h.numericProgress?.[date] || 0;
                 if (km > cur) state.updateSensorProgress(h.id, date, km);
-            } else if (h.sensorType === 'screen') {
+            } else if (slot === 'screen') {
                 const cur = h.numericProgress?.[date] || 0;
                 const used = d.sunsetSource === 'usagestats' ? d.sunsetMinutes : d.sunsetUnlocks;
                 if (used > cur) state.updateSensorProgress(h.id, date, used);
-            } else if (h.sensorType === 'noise' && d.live) {
+            } else if (slot === 'noise' && d.live) {
                 // In native mode the service owns the silence clock. In fallback
                 // mode startNoiseAccrual does, so this must not double-count.
                 const cur = h.timerProgress?.[date] || 0;
@@ -352,10 +454,12 @@ class SensorService {
 
     private startFallbackTracking(habits: any[]) {
         const today = localDate();
-        const has = (slot: string) => habits.some((h: any) => h.sensorType === slot);
+        // Same rule as the config and the commit: slot, not raw sensorType.
+        const bySlot = (slot: string) => habits.find((h: any) => habitSlot(h) === slot);
+        const has = (slot: string) => !!bySlot(slot);
 
         if (has('pedometer') || has('movement')) {
-            const seed = habits.find((h: any) => h.sensorType === 'pedometer' || h.sensorType === 'movement');
+            const seed = bySlot('pedometer') || bySlot('movement');
             this.startPedometer(seed?.numericProgress?.[today] || 0, (steps, activity) => {
                 this.emit({ steps, activity });
                 this.commitToStore();
@@ -363,7 +467,7 @@ class SensorService {
         }
 
         if (has('gps')) {
-            const seed = habits.find((h: any) => h.sensorType === 'gps');
+            const seed = bySlot('gps');
             const initialMeters = (seed?.numericProgress?.[today] || 0) * 1000;
             this.startLocationTracking(initialMeters, (lat, lng, distMeters) => {
                 this.emit({ location: { latitude: lat, longitude: lng }, distanceMeters: distMeters });
@@ -373,26 +477,53 @@ class SensorService {
 
         // Noise was never started by global tracking at all, so Deep Silence only
         // ever accrued while its detail screen happened to be open.
-        const noiseHabit = habits.find((h: any) => h.sensorType === 'noise');
+        const noiseHabit = bySlot('noise');
         if (noiseHabit) {
-            this.startNoiseSensor((db) => this.emit({ noise: db }));
-            this.startNoiseAccrual(noiseHabit.id, noiseHabit.noiseThresholdDb ?? 45);
+            this.startNoiseSensor((db) => this.emit({
+                noise: db,
+                noiseListening: true,
+                noiseHasReading: true,
+            }));
+            this.startNoiseAccrual(noiseHabit.id, clampNoiseThreshold(noiseHabit.noiseThresholdDb));
         }
     }
 
     /**
-     * Accrue one second of silence per wall-clock second spent under the
-     * threshold. Owning the clock in one interval avoids the previous bug where
-     * a new interval was created on every dB reading.
+     * Accrue one second of silence per wall-clock second the room stayed under the
+     * threshold, and keep the two numbers that make that total legible: the current
+     * unbroken run, and how many worthwhile runs were broken today.
+     *
+     * Owning the clock in one interval avoids the previous bug where a new interval
+     * was created on every dB reading. The threshold and the peak-per-second rule are
+     * deliberately identical to SensorForegroundService.startNoise, because the same
+     * habit must accrue the same way whichever path is running.
      */
     private startNoiseAccrual(habitId: string, thresholdDb: number) {
         this.stopNoiseAccrual();
+        this.emit({ noiseThresholdDb: thresholdDb });
+        this.noisePeakSeen = false;
+        this.noisePeakDb = 0;
         this.noiseAccrualTimer = setInterval(() => {
             const getStore = this.getStore;
             if (!getStore) return;
-            const db = this.live.noise;
-            // db === 0 means "no reading yet", not "perfect silence".
-            if (db <= 0 || db >= thresholdDb) return;
+
+            // A second with no frames at all is not evidence of anything: the streak
+            // is neither extended nor broken.
+            if (!this.noisePeakSeen) return;
+            const peak = this.noisePeakDb;
+            this.noisePeakSeen = false;
+            this.noisePeakDb = 0;
+
+            if (peak > thresholdDb) {
+                // A cough is not a broken silence; only a run worth having counts as
+                // one that was lost.
+                const broke = this.live.noiseStreakSeconds >= NOISE_DEFAULTS.breachMinQuietSeconds;
+                this.emit({
+                    noiseStreakSeconds: 0,
+                    noiseBreaches: this.live.noiseBreaches + (broke ? 1 : 0),
+                });
+                return;
+            }
 
             const state = getStore();
             const habit = (state.habits || []).find((h: any) => h.id === habitId);
@@ -402,7 +533,10 @@ class SensorService {
 
             const cur = habit.timerProgress?.[today] || 0;
             state.updateSensorProgress(habitId, today, cur + 1);
-            this.emit({ noiseSeconds: cur + 1 });
+            this.emit({
+                noiseSeconds: cur + 1,
+                noiseStreakSeconds: this.live.noiseStreakSeconds + 1,
+            });
         }, 1000);
     }
 
@@ -564,8 +698,21 @@ class SensorService {
     }
 
     /**
-     * Pull the service's last published readings without waiting for a tick, so a
-     * habit screen shows the real step count the moment it opens instead of zeros.
+     * Restore the service's last published counters, so a habit screen opens on the
+     * real numbers instead of on zeros.
+     *
+     * Read this carefully before changing it. The blob behind getRuntimeSnapshot is
+     * the per-slot overlay the service writes *for the widgets*: keyed by slot name,
+     * each entry `{id, progress, date}`. It is not the JS-shaped reading set that
+     * arrives on the tick listener. The two vocabularies overlap on exactly one word
+     * — "noise", which means a slot here and decibels there — so treating one as the
+     * other put a `{id, progress, date, note}` object into `live.noise` and took the
+     * Deep Silence card down with "Objects are not valid as a React child". Every
+     * other field silently fell through to its previous value, which is why the only
+     * visible symptom was that one screen.
+     *
+     * So: translate deliberately, name the unit at every step, and never widen a
+     * value from this blob without coercing it to a number first.
      */
     async loadRuntimeSnapshot(): Promise<void> {
         if (!hasNativeService) return;
@@ -573,17 +720,37 @@ class SensorService {
             const raw = await SensorBridge.getRuntimeSnapshot();
             const data = JSON.parse(raw || '{}');
             if (!data || typeof data !== 'object') return;
-            this.emit({
-                steps: data.steps ?? this.live.steps,
-                noise: data.noise ?? this.live.noise,
-                noiseSeconds: data.noiseSeconds ?? this.live.noiseSeconds,
-                distanceMeters: data.distanceMeters ?? this.live.distanceMeters,
-                sunsetMinutes: data.sunsetMinutes ?? this.live.sunsetMinutes,
-                sunsetUnlocks: data.sunsetUnlocks ?? this.live.sunsetUnlocks,
-                sunsetSource: data.sunsetSource ?? this.live.sunsetSource,
-                sunsetDate: data.sunsetDate ?? this.live.sunsetDate,
-                sunsetWindowOpen: data.sunsetWindowOpen ?? this.live.sunsetWindowOpen,
-            });
+
+            const today = localDate();
+
+            /** A slot's banked figure, or null if it is absent or from another day. */
+            const banked = (name: SensorSlot): number | null => {
+                const entry = (data as any)[name];
+                if (!entry || typeof entry !== 'object') return null;
+                // An overlay stamped with another date is yesterday's count, left
+                // behind by a service killed before it could roll the day over.
+                const stamp = typeof entry.date === 'string' ? entry.date : '';
+                if (stamp && stamp !== today) return null;
+                const value = Number(entry.progress);
+                return isFinite(value) ? value : null;
+            };
+
+            const steps = banked('pedometer') ?? banked('movement');
+            const quietSeconds = banked('noise');
+            const kilometres = banked('gps');
+
+            // Taken as-is rather than max()'d against the current snapshot: these come
+            // from the same service fields the tick listener reports, so they agree,
+            // and preferring the larger of the two would carry a count across midnight.
+            const next: Partial<LiveSensorData> = {};
+            if (steps !== null) next.steps = Math.round(steps);
+            if (quietSeconds !== null) next.noiseSeconds = Math.round(quietSeconds);
+            if (kilometres !== null) next.distanceMeters = kilometres * 1000;
+
+            // Decibels, activity and the sunset tier are instantaneous readings, not
+            // banked ones, so they are not in this blob at all. The first tick after
+            // the screen opens fills them in; until then the previous values stand.
+            if (Object.keys(next).length > 0) this.emit(next);
         } catch (e) { }
     }
 
@@ -634,6 +801,10 @@ class SensorService {
         }
         this.totalDistance = initialDistance;
         let lastFixAt = 0;
+        // Nothing has arrived yet, and saying so is the honest state: the first fix
+        // takes a while outdoors and may never come indoors, which is otherwise
+        // indistinguishable from a dead sensor.
+        this.emit({ gpsNote: 'WAITING FOR A FIX' });
         Geolocation.watchPosition(
             (position) => {
                 const { latitude, longitude, accuracy } = position.coords;
@@ -641,6 +812,10 @@ class SensorService {
 
                 // A fix this imprecise is a guess, not a position.
                 if (typeof accuracy === 'number' && accuracy > ACCURACY_LIMIT_M) return;
+
+                // Cleared before the segment filters, not after: a rejected segment
+                // still proves location is working.
+                if (this.live.gpsNote) this.emit({ gpsNote: '' });
 
                 if (this.lastPosition) {
                     const d = this.calculateDistance(
@@ -669,7 +844,20 @@ class SensorService {
 
                 onData(latitude, longitude, this.totalDistance);
             },
-            (error) => console.log(error),
+            (error) => {
+                // Was console.log and nothing else, so a refused permission or a
+                // switched-off location toggle produced a habit stuck at zero with no
+                // account of itself anywhere the user could see.
+                console.log(error);
+                const code = (error as any)?.code;
+                this.emit({
+                    gpsNote:
+                        code === 1 ? 'LOCATION NOT ALLOWED'
+                            : code === 5 ? 'LOCATION SWITCHED OFF'
+                                : code === 3 ? 'WAITING FOR A FIX'
+                                    : 'NO LOCATION SOURCE',
+                });
+            },
             {
                 enableHighAccuracy: true,
                 // Filtering happens above, in one place: the platform's own
@@ -700,6 +888,9 @@ class SensorService {
 
     stopLocationTracking() {
         if (Geolocation) Geolocation.stopObserving();
+        // Nothing is listening because nothing asked it to, which is not a fault.
+        // A stale "waiting for a fix" would explain a paused habit as a broken one.
+        this.emit({ gpsNote: '' });
     }
 
     // Sound Level (Real)
@@ -712,24 +903,54 @@ class SensorService {
             if (this.isNoiseSensorRunning) return;
             RNSoundLevel.start();
             this.isNoiseSensorRunning = true;
+            this.noisePeakDb = 0;
+            this.noisePeakSeen = false;
             RNSoundLevel.onNewFrame = (data: any) => {
                 const level = Math.max(0, data.value + 100);
-                onData(Math.floor(level));
+                const db = Math.floor(level);
+                // Peak, not average, and held until the accrual interval consumes it:
+                // frames arrive several times a second, and one quiet frame does not
+                // make the second quiet. Averaging would let a short bark hide inside
+                // an otherwise still second and still bank it as silence.
+                if (!this.noisePeakSeen || db > this.noisePeakDb) {
+                    this.noisePeakDb = db;
+                    this.noisePeakSeen = true;
+                }
+                onData(db);
             };
         } catch (e) {
             console.warn("Failed to start noise sensor", e);
         }
     }
 
+    /**
+     * Release the microphone and say so.
+     *
+     * Both callers are "stop everything" paths, so the mic-off state is emitted in
+     * native mode too, where nothing of ours was listening. That is not redundant: the
+     * foreground service publishes noiseListening=false from its own stopNoise, but a
+     * service that is being torn down may not get that publish out before it dies —
+     * and the habit screen would then sit showing an advancing run of quiet next to a
+     * microphone that is no longer open.
+     */
     stopNoiseSensor() {
         if (RNSoundLevel && this.isNoiseSensorRunning) {
             try {
                 RNSoundLevel.stop();
-                this.isNoiseSensorRunning = false;
             } catch (e) {
                 console.warn("Error stopping sound level", e);
             }
         }
+        this.isNoiseSensorRunning = false;
+        this.noisePeakSeen = false;
+        this.noisePeakDb = 0;
+        // Ending the run is the user's own choice, so it is not charged as a breach —
+        // see startNoiseAccrual.
+        this.emit({
+            noiseListening: false,
+            noiseHasReading: false,
+            noiseStreakSeconds: 0,
+        });
     }
 
     /**

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Empty-slot button. Dashed on purpose: a dashed outline reads as a placeholder
+  waiting to be filled, which is exactly what an unlinked widget is. The solid
+  accent border it replaces looked like a live, pressable control and so made an
+  empty widget look like a broken one.
+
+  dashGap without a dashWidth draws nothing, and a dashed stroke needs the shape
+  to be software-rendered — both are handled by the platform for shape drawables
+  used as a View background, which is the only way this is ever used.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#00000000" />
+    <corners android:radius="12dp" />
+    <stroke
+        android:width="1dp"
+        android:color="#D71921"
+        android:dashWidth="3dp"
+        android:dashGap="3dp" />
+</shape>

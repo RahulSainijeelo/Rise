@@ -3,7 +3,7 @@ import dayjs from 'dayjs';
 import {
     SENSOR_SLOTS,
     SENSOR_PAYLOAD_VERSION,
-    TEMPLATE_SLOT,
+    habitSlot,
     SUNSET_DEFAULTS,
 } from './WidgetContract';
 import {
@@ -27,7 +27,7 @@ const WidgetBridge = NativeModules.WidgetBridge;
  * better and the day is not decided until the window closes.
  */
 const sensorNote = (habit: any, date: string): string => {
-    if (habit.sensorType === 'screen') {
+    if (habitSlot(habit) === 'screen') {
         const cutoff = habit.cutoffTime || SUNSET_DEFAULTS.cutoffTime;
         const end = habit.windowEndTime || SUNSET_DEFAULTS.windowEndTime;
         const used = habitProgress(habit, date);
@@ -153,12 +153,15 @@ export const WidgetService = {
             // ---------------------------------------------------------------
             // Dedicated payload for the five sensor widgets.
             //
-            // Binding is deterministic: templateId first, then an exact
-            // sensorType match. The previous version guessed from the title
-            // (`includes('sunset') || includes('phone') || includes('night')`),
-            // so renaming a habit orphaned its widget and two similarly named
-            // habits fought over one slot. It then discarded the user's goal and
-            // unit in favour of hardcoded ones. See docs/WIDGET_CONTRACT.md.
+            // Binding is deterministic and goes through habitSlot: templateId
+            // first, then an exact sensorType match, with every layer asking the
+            // same function so the widget and the sensor behind it can never
+            // disagree about which habit owns a slot. The previous version guessed
+            // from the title (`includes('sunset') || includes('phone') ||
+            // includes('night')`), so renaming a habit orphaned its widget and two
+            // similarly named habits fought over one slot. It then discarded the
+            // user's goal and unit in favour of hardcoded ones.
+            // See docs/WIDGET_CONTRACT.md.
             // ---------------------------------------------------------------
             const sensorData: any = {
                 _meta: {
@@ -168,16 +171,18 @@ export const WidgetService = {
                 },
             };
 
+            /** Habits already owned by one of the five dedicated widgets. */
+            const boundIds = new Set<string>();
+
             SENSOR_SLOTS.forEach((slot) => {
-                const byTemplate = (habits || []).find(
-                    (h: any) => h.templateId && TEMPLATE_SLOT[h.templateId] === slot
-                );
-                const habit = byTemplate || (habits || []).find((h: any) => h.sensorType === slot);
+                const habit = (habits || []).find((h: any) => habitSlot(h) === slot);
 
                 if (!habit) {
                     sensorData[slot] = { exists: false };
                     return;
                 }
+
+                boundIds.add(habit.id);
 
                 sensorData[slot] = {
                     exists: true,
@@ -202,6 +207,39 @@ export const WidgetService = {
 
             if (typeof WidgetBridge.setSensorData === 'function') {
                 WidgetBridge.setSensorData(JSON.stringify(sensorData));
+            }
+
+            // ---------------------------------------------------------------
+            // Everything else, for the wrapper widget.
+            //
+            // The five slots above are hardcoded bindings to specific templates.
+            // A habit the user invented has no slot, so it had no widget at all;
+            // this is the same field set, as a list, for HabitLinkWidget to pick
+            // from. Sensor-bound habits are left out on purpose — they already
+            // have a widget of their own, and two widgets writing one habit's
+            // progress from different models is how double-counting starts.
+            // ---------------------------------------------------------------
+            if (typeof WidgetBridge.setHabitsData === 'function') {
+                const habitsData = (habits || [])
+                    .filter((h: any) => h && h.id && !boundIds.has(h.id) && !h.isSensorBased)
+                    .map((habit: any) => ({
+                        exists: true,
+                        id: habit.id,
+                        templateId: habit.templateId,
+                        title: habit.title,
+                        habitType: habit.type || 'check',
+                        progress: habitProgress(habit, today),
+                        goal: habitGoal(habit),
+                        unit: (habit.numericUnit || '').toUpperCase(),
+                        step: habitStep(habit),
+                        displayMode: habitDisplayMode(habit),
+                        goalDirection: habit.goalDirection || 'atLeast',
+                        isCompleted: habit.completedDates?.includes(today) || false,
+                        streak: habit.streak || 0,
+                        controls: habitControls(habit),
+                        note: sensorNote(habit, today),
+                    }));
+                WidgetBridge.setHabitsData(JSON.stringify(habitsData));
             }
 
             // Hand the native service the window and threshold config it needs to

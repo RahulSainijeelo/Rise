@@ -1,4 +1,5 @@
 import { PermissionsAndroid, Platform } from 'react-native';
+import { habitSlot, type SensorSlot } from '../services/WidgetContract';
 
 export const requestStoragePermission = async () => {
     if (Platform.OS !== 'android') return true;
@@ -40,10 +41,14 @@ const sensorPermissionsFor = (habits: any[]): string[] => {
     const sdk = typeof Platform.Version === 'number' ? Platform.Version : 0;
     const needed = new Set<string>();
 
+    // Slot, not raw sensorType. A habit whose sensorType went missing while its
+    // templateId survived still needs its permission asked for — otherwise City
+    // Glider was never granted location at all, and a distance habit that is never
+    // allowed to see a GPS fix reads zero metres forever with nothing to show why.
     const types = new Set(
         (habits || [])
-            .filter((h: any) => h?.isSensorBased)
-            .map((h: any) => h.sensorType)
+            .map((h: any) => habitSlot(h))
+            .filter((slot): slot is SensorSlot => slot !== null)
     );
 
     if (types.has('pedometer') || types.has('movement')) {
@@ -92,4 +97,41 @@ export const requestSensorPermissions = async (habits: any[]): Promise<string[]>
         console.warn('Sensor permission request failed', err);
         return wanted;
     }
+};
+
+/**
+ * Which permissions one habit still lacks, checked without prompting.
+ *
+ * For telling the user why a sensor habit is reading zero. POST_NOTIFICATIONS is
+ * excluded on purpose: without it the foreground service loses its visible face, but
+ * it keeps measuring, so listing it here would misattribute the silence.
+ *
+ * A denial used to be invisible — the native service logged its bail to logcat and
+ * the screen carried on drawing a confident 0.0 KM, which reads as a broken sensor
+ * rather than a permission the user can grant.
+ */
+export const missingSensorPermissions = async (habit: any): Promise<string[]> => {
+    if (Platform.OS !== 'android' || !habit) return [];
+
+    const wanted = sensorPermissionsFor([habit]).filter(
+        p => p !== 'android.permission.POST_NOTIFICATIONS'
+    );
+    if (wanted.length === 0) return [];
+
+    try {
+        const already = await Promise.all(wanted.map(p => PermissionsAndroid.check(p as any)));
+        return wanted.filter((_, i) => !already[i]);
+    } catch (err) {
+        console.warn('Sensor permission check failed', err);
+        return [];
+    }
+};
+
+/** Human label for a permission string, for the "grant this" prompts. */
+export const permissionLabel = (permission: string): string => {
+    if (permission.endsWith('ACCESS_FINE_LOCATION')) return 'LOCATION';
+    if (permission.endsWith('ACTIVITY_RECOGNITION')) return 'PHYSICAL ACTIVITY';
+    if (permission.endsWith('RECORD_AUDIO')) return 'MICROPHONE';
+    if (permission.endsWith('POST_NOTIFICATIONS')) return 'NOTIFICATIONS';
+    return permission.split('.').pop() || permission;
 };

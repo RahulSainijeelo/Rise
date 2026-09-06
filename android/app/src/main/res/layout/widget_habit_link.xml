@@ -1,0 +1,400 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Rise: Habit — the wrapper widget.
+
+  One instance shows one habit of the user's choosing. The five sensor widgets are
+  bound to fixed templates, so a habit somebody invented had no widget at all; this
+  binds by id instead, and shows one of three faces depending on the habit's goal
+  type:
+
+    habit_face_check     DONE / NOT DONE, with the streak
+    habit_face_numeric   a value against a goal, with −step / +step
+    habit_face_timer     a self-ticking countdown with start/pause and reset
+
+  There is not one bare <View> in this file, and that is load-bearing rather than
+  tidy: RemoteViews inflates through a LayoutInflater.Filter that admits only classes
+  carrying @RemoteView, and android.view.View does not carry it. A single spacer is
+  enough to throw "Class not allowed to be inflated", which the launcher reports as
+  the unhelpful "Couldn't add widget". Spacing is margins and layout_weight.
+
+  The countdown is a Chronometer, not a TextView the provider writes: with setBase and
+  setChronometerCountDown the system ticks it down by itself, so a running timer needs
+  no per-second RemoteViews push — which the host would throttle anyway and which
+  would cost a wakeup a second.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/link_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:orientation="vertical"
+    android:padding="10dp">
+
+    <!--
+      Header: habit title + app mark. Tapping either opens the habit.
+
+      The mark sits in the same bordered tile the five dedicated sensor widgets use.
+      A wrapper widget is the one the user will place several of, side by side, so
+      matching them is not decoration — it is what makes a row of them read as one
+      family rather than as five from the app and one from somewhere else.
+    -->
+    <RelativeLayout
+        android:id="@+id/link_header"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+
+        <TextView
+            android:id="@+id/link_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_alignParentStart="true"
+            android:layout_centerVertical="true"
+            android:layout_toStartOf="@+id/link_logo"
+            android:ellipsize="end"
+            android:letterSpacing="0.12"
+            android:maxLines="1"
+            android:text="HABIT"
+            android:textColor="#FFFFFF"
+            android:textSize="10sp"
+            android:textStyle="bold" />
+
+        <ImageView
+            android:id="@+id/link_logo"
+            android:layout_width="26dp"
+            android:layout_height="26dp"
+            android:layout_alignParentEnd="true"
+            android:layout_centerVertical="true"
+            android:background="@drawable/widget_slot_tile"
+            android:contentDescription="@string/widget_sensor_icon_desc"
+            android:padding="5dp"
+            android:src="@drawable/widget_icon_habits" />
+    </RelativeLayout>
+
+    <!-- ============================ CHECK ============================ -->
+    <LinearLayout
+        android:id="@+id/habit_face_check"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/check_state"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:includeFontPadding="false"
+            android:letterSpacing="0.04"
+            android:text="NOT DONE"
+            android:textColor="#FFFFFF"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/check_streak"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:letterSpacing="0.08"
+            android:text=""
+            android:textColor="#8A8A8A"
+            android:textSize="8sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/check_btn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/widget_ctrl_pill"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:maxLines="1"
+            android:paddingTop="7dp"
+            android:paddingBottom="7dp"
+            android:text="✓ DONE"
+            android:textColor="#FFFFFF"
+            android:textSize="10sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- ============================ COUNT ============================ -->
+    <LinearLayout
+        android:id="@+id/habit_face_numeric"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:baselineAligned="false"
+            android:gravity="bottom"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/numeric_value"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="@font/ndot"
+                android:includeFontPadding="false"
+                android:text="0"
+                android:textColor="#FFFFFF"
+                android:textSize="34sp" />
+
+            <TextView
+                android:id="@+id/numeric_unit"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="5dp"
+                android:layout_marginBottom="3dp"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:letterSpacing="0.08"
+                android:maxLines="1"
+                android:text=""
+                android:textColor="#AAAAAA"
+                android:textSize="8sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/numeric_goal"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="3dp"
+                android:text=""
+                android:textColor="#666666"
+                android:textSize="8sp" />
+        </LinearLayout>
+
+        <ProgressBar
+            android:id="@+id/numeric_progress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="6dp"
+            android:layout_marginTop="3dp"
+            android:progressDrawable="@drawable/widget_meter_bar" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:baselineAligned="false"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/numeric_dec"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="@drawable/widget_ctrl_pill"
+                android:ellipsize="end"
+                android:gravity="center"
+                android:maxLines="1"
+                android:paddingTop="6dp"
+                android:paddingBottom="6dp"
+                android:text="−1"
+                android:textColor="#FFFFFF"
+                android:textSize="10sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/numeric_inc"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:layout_weight="1"
+                android:background="@drawable/widget_ctrl_pill"
+                android:ellipsize="end"
+                android:gravity="center"
+                android:maxLines="1"
+                android:paddingTop="6dp"
+                android:paddingBottom="6dp"
+                android:text="+1"
+                android:textColor="#FFFFFF"
+                android:textSize="10sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/numeric_check"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:layout_weight="1"
+                android:background="@drawable/widget_ctrl_pill"
+                android:ellipsize="end"
+                android:gravity="center"
+                android:maxLines="1"
+                android:paddingTop="6dp"
+                android:paddingBottom="6dp"
+                android:text="✓"
+                android:textColor="#FFFFFF"
+                android:textSize="10sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- ============================ TIMER ============================ -->
+    <LinearLayout
+        android:id="@+id/habit_face_timer"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:baselineAligned="false"
+            android:gravity="bottom"
+            android:orientation="horizontal">
+
+            <!--
+              Ticks itself, in all three states. setBase calls updateText immediately,
+              so a Chronometer with started=false still renders base-minus-now — which
+              is exactly the paused reading, and the full duration when idle. That is
+              why there is no separate static TextView here; TaskTimerWidget leans on
+              the same behaviour for the focus countdown.
+            -->
+            <Chronometer
+                android:id="@+id/timer_chrono"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="@font/ndot"
+                android:includeFontPadding="false"
+                android:textColor="#FFFFFF"
+                android:textSize="34sp" />
+
+            <TextView
+                android:id="@+id/timer_state"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:layout_marginBottom="4dp"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:letterSpacing="0.08"
+                android:maxLines="1"
+                android:text=""
+                android:textColor="#8A8A8A"
+                android:textSize="8sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <ProgressBar
+            android:id="@+id/timer_progress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="6dp"
+            android:layout_marginTop="3dp"
+            android:progressDrawable="@drawable/widget_meter_bar" />
+
+        <TextView
+            android:id="@+id/timer_today"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text=""
+            android:textColor="#666666"
+            android:textSize="8sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:baselineAligned="false"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/timer_run"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="2"
+                android:background="@drawable/widget_ctrl_pill"
+                android:ellipsize="end"
+                android:gravity="center"
+                android:maxLines="1"
+                android:paddingTop="6dp"
+                android:paddingBottom="6dp"
+                android:text="▶ START"
+                android:textColor="#FFFFFF"
+                android:textSize="10sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/timer_reset"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:layout_weight="1"
+                android:background="@drawable/widget_ctrl_pill"
+                android:ellipsize="end"
+                android:gravity="center"
+                android:maxLines="1"
+                android:paddingTop="6dp"
+                android:paddingBottom="6dp"
+                android:text="↺"
+                android:textColor="#FFFFFF"
+                android:textSize="10sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- ==================== UNBOUND / PICKER ==================== -->
+    <!--
+      Two jobs, one container. Unbound, it is a "+ LINK HABIT" button; tapped, the
+      same widget fills with the habit list and each row binds on press. Drawn inside
+      the widget rather than through a transparent activity, so linking a habit does
+      not cold-launch the app — the same reasoning as the task widget's label picker.
+    -->
+    <LinearLayout
+        android:id="@+id/habit_face_empty"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/empty_btn"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/widget_slot_dash"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="5dp"
+            android:paddingBottom="5dp"
+            android:text="+ LINK HABIT"
+            android:textColor="#D71921"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/empty_hint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:gravity="center"
+            android:text=""
+            android:textColor="#666666"
+            android:textSize="8sp" />
+    </LinearLayout>
+
+    <ListView
+        android:id="@+id/link_picker_list"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:divider="@null"
+        android:dividerHeight="0dp"
+        android:visibility="gone" />
+
+</LinearLayout>

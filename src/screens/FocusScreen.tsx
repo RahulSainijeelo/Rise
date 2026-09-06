@@ -45,6 +45,7 @@ import {
     getFocusHistory,
     getFocusState,
     getFocusTheme,
+    onTint,
     pad2,
     remainingMs,
     setFocusTheme,
@@ -442,20 +443,36 @@ const FocusScreen: React.FC = () => {
         );
     };
 
-    const pill = (
-        label: string,
+    /**
+     * A round icon button.
+     *
+     * The run controls used to be icon-plus-label pills whose filled variant hard-coded
+     * a white foreground over the ring colour, so the `mono` theme drew a white glyph
+     * and white text on a white fill — the blank white button the user hit. The
+     * foreground now comes from onTint(), and the label moved to accessibilityLabel so
+     * the control is a glyph on screen and still a named button to a screen reader.
+     */
+    const iconBtn = (
+        key: string,
+        Icon: typeof Play,
         onPress: () => void,
-        opts?: { Icon?: typeof Play; filled?: boolean; wide?: boolean; tint?: string },
+        label: string,
+        opts?: { filled?: boolean; size?: number },
     ) => {
-        const Icon = opts?.Icon;
-        const tint = opts?.tint ?? ring.from;
+        const size = opts?.size ?? 56;
+        const tint = ring.from;
         return (
             <Pressable
+                key={key}
                 onPress={onPress}
+                accessibilityRole="button"
+                accessibilityLabel={label}
                 style={({ pressed }) => [
-                    styles.pill,
-                    opts?.wide && styles.pillWide,
+                    styles.iconBtn,
                     {
+                        width: size,
+                        height: size,
+                        borderRadius: size / 2,
                         backgroundColor: opts?.filled
                             ? tint
                             : pressed
@@ -465,22 +482,10 @@ const FocusScreen: React.FC = () => {
                         opacity: pressed ? 0.85 : 1,
                     },
                 ]}>
-                {Icon ? (
-                    <Icon
-                        size={16}
-                        color={opts?.filled ? '#FFFFFF' : theme.colors.text}
-                    />
-                ) : null}
-                <Text
-                    style={{
-                        fontFamily: boldFont,
-                        fontSize: 12,
-                        letterSpacing: 1.6,
-                        marginLeft: Icon ? 8 : 0,
-                        color: opts?.filled ? '#FFFFFF' : theme.colors.text,
-                    }}>
-                    {label}
-                </Text>
+                <Icon
+                    size={Math.round(size * 0.38)}
+                    color={opts?.filled ? onTint(tint) : theme.colors.text}
+                />
             </Pressable>
         );
     };
@@ -564,15 +569,22 @@ const FocusScreen: React.FC = () => {
                             </Pressable>
                         ))}
                     </View>
-                    {pill('START', onStart, { Icon: Play, filled: true, wide: true })}
+                    <View style={styles.controlRow}>
+                        {iconBtn('start', Play, onStart, 'Start focus', {
+                            filled: true,
+                            size: 76,
+                        })}
+                    </View>
                 </>
             ) : (
                 <View style={styles.controlRow}>
                     {running
-                        ? pill('PAUSE', () => run('pause'), { Icon: Pause })
-                        : pill('RESUME', () => run('resume'), { Icon: Play, filled: true })}
-                    {pill('RESET', () => run('reset'), { Icon: RotateCcw })}
-                    {pill('ZEN', () => setZen(true), { Icon: Maximize2 })}
+                        ? iconBtn('pause', Pause, () => run('pause'), 'Pause')
+                        : iconBtn('resume', Play, () => run('resume'), 'Resume', {
+                              filled: true,
+                          })}
+                    {iconBtn('reset', RotateCcw, () => run('reset'), 'Reset')}
+                    {iconBtn('zen', Maximize2, () => setZen(true), 'Zen mode')}
                 </View>
             )}
 
@@ -779,54 +791,57 @@ const FocusScreen: React.FC = () => {
     return (
         <SafeAreaView style={[styles.root, { backgroundColor: theme.colors.background }]}>
             <View style={styles.header}>
-                <View>
-                    <Text
-                        style={{
-                            fontFamily: boldFont,
-                            fontSize: 22,
-                            letterSpacing: 1,
-                            color: theme.colors.text,
-                        }}>
-                        Focus
-                    </Text>
+                {/*
+                  The dot heading the other tabs use. `dotFont` is not it —
+                  getFontFamily('dot') resolves to Courier, which is why every screen
+                  that wants the brand face names 'ndot' literally.
+                */}
+                <Text
+                    style={{
+                        fontFamily: 'ndot',
+                        fontSize: 32,
+                        color: theme.colors.text,
+                    }}>
+                    RISE FOCUS
+                </Text>
+                <View style={styles.headerRow}>
                     <Text
                         style={{
                             fontFamily: mediumFont,
                             fontSize: 11,
-                            marginTop: 2,
                             color: theme.colors.textSecondary,
                         }}>
                         {durationText(totals.today)} today
                     </Text>
-                </View>
-                <View style={[styles.segment, { borderColor: theme.colors.border }]}>
-                    {(['timer', 'history'] as SubTab[]).map(t => {
-                        const active = tab === t;
-                        return (
-                            <Pressable
-                                key={t}
-                                onPress={() => {
-                                    setTab(t);
-                                    if (t === 'history') refreshHistory();
-                                }}
-                                style={[
-                                    styles.segmentBtn,
-                                    active && { backgroundColor: theme.colors.surface2 },
-                                ]}>
-                                <Text
-                                    style={{
-                                        fontFamily: mediumFont,
-                                        fontSize: 10,
-                                        letterSpacing: 1.4,
-                                        color: active
-                                            ? theme.colors.text
-                                            : theme.colors.textSecondary,
-                                    }}>
-                                    {t === 'timer' ? 'TIMER' : 'HISTORY'}
-                                </Text>
-                            </Pressable>
-                        );
-                    })}
+                    <View style={[styles.segment, { borderColor: theme.colors.border }]}>
+                        {(['timer', 'history'] as SubTab[]).map(t => {
+                            const active = tab === t;
+                            return (
+                                <Pressable
+                                    key={t}
+                                    onPress={() => {
+                                        setTab(t);
+                                        if (t === 'history') refreshHistory();
+                                    }}
+                                    style={[
+                                        styles.segmentBtn,
+                                        active && { backgroundColor: theme.colors.surface2 },
+                                    ]}>
+                                    <Text
+                                        style={{
+                                            fontFamily: mediumFont,
+                                            fontSize: 10,
+                                            letterSpacing: 1.4,
+                                            color: active
+                                                ? theme.colors.text
+                                                : theme.colors.textSecondary,
+                                        }}>
+                                        {t === 'timer' ? 'TIMER' : 'HISTORY'}
+                                    </Text>
+                                </Pressable>
+                            );
+                        })}
+                    </View>
                 </View>
             </View>
 
@@ -915,12 +930,15 @@ const FocusScreen: React.FC = () => {
 const styles = StyleSheet.create({
     root: { flex: 1 },
     header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
         paddingHorizontal: 20,
         paddingTop: 8,
         paddingBottom: 12,
+    },
+    headerRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginTop: 6,
     },
     segment: {
         flexDirection: 'row',
@@ -977,17 +995,12 @@ const styles = StyleSheet.create({
         marginHorizontal: 4,
         marginBottom: 8,
     },
-    pill: {
-        flexDirection: 'row',
+    iconBtn: {
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 1,
-        borderRadius: 999,
-        paddingHorizontal: 18,
-        paddingVertical: 12,
-        marginHorizontal: 4,
+        marginHorizontal: 8,
     },
-    pillWide: { paddingHorizontal: 44, marginTop: 8 },
     controlRow: {
         flexDirection: 'row',
         justifyContent: 'center',

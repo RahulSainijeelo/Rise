@@ -4,45 +4,83 @@
   digital sunset). Rendered exclusively by SensorWidgetRenderer.
 
   Every piece of text here is a placeholder. The renderer sets all of it from the
-  habit's own data, because the previous version hardcoded "STEP LEGEND",
-  "STEPS" and "GOAL: 10000" into the XML and the Kotlin, so renaming a habit or
-  changing its goal in the app had no effect on the widget at all.
+  habit's own data, because an earlier version hardcoded "STEP LEGEND", "STEPS"
+  and "GOAL: 10000" into the XML and the Kotlin, so renaming a habit or changing
+  its goal in the app had no effect on the widget at all.
+
+  On the visual language: the number is the widget, so it gets the app's own dot
+  font at a size you can read across a desk, and everything else is deliberately
+  quiet around it — a letterspaced caps title, a hairline rule, an icon in a
+  bordered tile, and outlined control pills. The previous version gave the title,
+  the value, the goal and the buttons each their own visual weight, which left
+  nothing for the eye to land on first.
+
+  Only @RemoteView-annotated classes inflate inside a widget, so there is not a
+  single bare <View> in here: the hairline is an ImageView with a background.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@drawable/widget_background"
     android:orientation="vertical"
-    android:padding="10dp">
+    android:padding="12dp">
 
-    <!-- Header: habit title + slot icon -->
-    <RelativeLayout
+    <!-- Header: slot badge, habit title, completion percentage -->
+    <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content">
-
-        <TextView
-            android:id="@+id/habit_title"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_alignParentStart="true"
-            android:layout_centerVertical="true"
-            android:layout_toStartOf="@+id/app_logo"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:text="HABIT"
-            android:textColor="#FFFFFF"
-            android:textSize="11sp"
-            android:textStyle="bold" />
+        android:layout_height="wrap_content"
+        android:baselineAligned="false"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
 
         <ImageView
             android:id="@+id/app_logo"
-            android:layout_width="22dp"
-            android:layout_height="22dp"
-            android:layout_alignParentEnd="true"
-            android:layout_centerVertical="true"
+            android:layout_width="26dp"
+            android:layout_height="26dp"
+            android:background="@drawable/widget_slot_tile"
             android:contentDescription="@string/widget_sensor_icon_desc"
+            android:padding="5dp"
             android:src="@drawable/widget_icon_steps" />
-    </RelativeLayout>
+
+        <TextView
+            android:id="@+id/habit_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:letterSpacing="0.12"
+            android:maxLines="1"
+            android:text="HABIT"
+            android:textColor="#FFFFFF"
+            android:textSize="10sp"
+            android:textStyle="bold" />
+
+        <!--
+          Percentage, not a second copy of the value. It is the one number that
+          means the same thing on all five widgets and on an inverse goal, where a
+          rising raw count is bad news and only the fraction says how much room is
+          left.
+        -->
+        <TextView
+            android:id="@+id/habit_percent"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:includeFontPadding="false"
+            android:text=""
+            android:textColor="#8A8A8A"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <ImageView
+        android:id="@+id/habit_divider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginTop="9dp"
+        android:background="#1F1F1F"
+        android:importantForAccessibility="no" />
 
     <!-- Active state -->
     <LinearLayout
@@ -57,46 +95,61 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:baselineAligned="false"
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
+            <!--
+              Value and unit on one baseline rather than stacked. Stacked, the unit
+              sat under the number like a caption and the pair read as two facts;
+              inline it reads as one quantity, which is what it is.
+            -->
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:orientation="vertical">
+                android:baselineAligned="true"
+                android:orientation="horizontal">
 
                 <TextView
                     android:id="@+id/sensor_value"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:fontFamily="@font/ndot"
                     android:includeFontPadding="false"
                     android:text="0"
                     android:textColor="#FFFFFF"
-                    android:textSize="26sp"
-                    android:textStyle="bold" />
+                    android:textSize="38sp" />
 
                 <TextView
                     android:id="@+id/sensor_unit"
-                    android:layout_width="wrap_content"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:letterSpacing="0.08"
+                    android:layout_marginStart="5dp"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:letterSpacing="0.1"
+                    android:maxLines="1"
                     android:text=""
-                    android:textColor="#AAAAAA"
-                    android:textSize="8sp"
+                    android:textColor="#8A8A8A"
+                    android:textSize="9sp"
                     android:textStyle="bold" />
             </LinearLayout>
 
             <!--
               Six dot-matrix frames. The renderer points these at one of the
-              anim_<sequence>_f1..f6 asset sets: the slot's own idle sequence
-              while the habit is in progress, and anim_complete_* once it is done,
+              anim_<sequence>_frame1..3 asset sets: the slot's own idle sequence
+              while the habit is in progress, and anim_completed_* once it is done,
               which is what makes a finished habit feel finished on the home screen.
+
+              Six views over three assets is deliberate — the flipper simply plays
+              the loop twice per pass. applySequence indexes modulo the sequence
+              length, so the counts do not have to agree.
             -->
             <ViewFlipper
                 android:id="@+id/habit_anim_flipper"
-                android:layout_width="48dp"
-                android:layout_height="34dp"
+                android:layout_width="46dp"
+                android:layout_height="32dp"
                 android:autoStart="true"
                 android:flipInterval="400">
 
@@ -105,42 +158,42 @@
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
                     android:contentDescription="@string/widget_sensor_anim_desc"
-                    android:src="@drawable/anim_step_f1" />
+                    android:src="@drawable/anim_step_frame1" />
 
                 <ImageView
                     android:id="@+id/habit_anim_frame2"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
                     android:contentDescription="@string/widget_sensor_anim_desc"
-                    android:src="@drawable/anim_step_f2" />
+                    android:src="@drawable/anim_step_frame2" />
 
                 <ImageView
                     android:id="@+id/habit_anim_frame3"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
                     android:contentDescription="@string/widget_sensor_anim_desc"
-                    android:src="@drawable/anim_step_f3" />
+                    android:src="@drawable/anim_step_frame3" />
 
                 <ImageView
                     android:id="@+id/habit_anim_frame4"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
                     android:contentDescription="@string/widget_sensor_anim_desc"
-                    android:src="@drawable/anim_step_f4" />
+                    android:src="@drawable/anim_step_frame1" />
 
                 <ImageView
                     android:id="@+id/habit_anim_frame5"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
                     android:contentDescription="@string/widget_sensor_anim_desc"
-                    android:src="@drawable/anim_step_f5" />
+                    android:src="@drawable/anim_step_frame2" />
 
                 <ImageView
                     android:id="@+id/habit_anim_frame6"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
                     android:contentDescription="@string/widget_sensor_anim_desc"
-                    android:src="@drawable/anim_step_f6" />
+                    android:src="@drawable/anim_step_frame3" />
             </ViewFlipper>
         </LinearLayout>
 
@@ -149,26 +202,27 @@
             android:id="@+id/habit_progress_container"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="3dp"
+            android:layout_marginTop="8dp"
             android:orientation="vertical">
 
             <ProgressBar
                 android:id="@+id/habit_progress"
                 style="?android:attr/progressBarStyleHorizontal"
                 android:layout_width="match_parent"
-                android:layout_height="4dp"
-                android:progressDrawable="@drawable/widget_progress_bar" />
+                android:layout_height="6dp"
+                android:progressDrawable="@drawable/widget_meter_bar" />
 
             <RelativeLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="2dp">
+                android:layout_marginTop="5dp">
 
                 <TextView
                     android:id="@+id/habit_status_badge"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_alignParentStart="true"
+                    android:letterSpacing="0.08"
                     android:text=""
                     android:textColor="#D71921"
                     android:textSize="8sp"
@@ -179,22 +233,26 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_alignParentEnd="true"
+                    android:letterSpacing="0.06"
                     android:text=""
-                    android:textColor="#666666"
+                    android:textColor="#5F5F5F"
                     android:textSize="8sp" />
             </RelativeLayout>
 
             <!--
-              Secondary status line. Load-bearing for Digital Sunset, where the
-              raw number cannot tell you whether you are winning: "3 / 5" means
-              nothing until you know smaller is better and the window is still open.
+              Secondary status line. Load-bearing for Digital Sunset, where the raw
+              number cannot tell you whether you are winning ("3 / 5" means nothing
+              until you know smaller is better and the window is still open), and
+              for Deep Silence, where it carries the live level and whether the
+              clock is banking — a stalled timer with no explanation looks broken.
             -->
             <TextView
                 android:id="@+id/habit_note"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="1dp"
+                android:layout_marginTop="3dp"
                 android:ellipsize="end"
+                android:letterSpacing="0.04"
                 android:maxLines="1"
                 android:text=""
                 android:textColor="#8A8A8A"
@@ -209,7 +267,7 @@
             android:id="@+id/habit_control_row"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="5dp"
+            android:layout_marginTop="9dp"
             android:baselineAligned="false"
             android:orientation="horizontal">
 
@@ -218,12 +276,13 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:background="@drawable/widget_item_bg"
+                android:background="@drawable/widget_ctrl_pill"
                 android:ellipsize="end"
                 android:gravity="center"
+                android:letterSpacing="0.06"
                 android:maxLines="1"
-                android:paddingTop="5dp"
-                android:paddingBottom="5dp"
+                android:paddingTop="7dp"
+                android:paddingBottom="7dp"
                 android:text=""
                 android:textColor="#FFFFFF"
                 android:textSize="10sp"
@@ -233,14 +292,15 @@
                 android:id="@+id/habit_btn_2"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="4dp"
+                android:layout_marginStart="5dp"
                 android:layout_weight="1"
-                android:background="@drawable/widget_item_bg"
+                android:background="@drawable/widget_ctrl_pill"
                 android:ellipsize="end"
                 android:gravity="center"
+                android:letterSpacing="0.06"
                 android:maxLines="1"
-                android:paddingTop="5dp"
-                android:paddingBottom="5dp"
+                android:paddingTop="7dp"
+                android:paddingBottom="7dp"
                 android:text=""
                 android:textColor="#FFFFFF"
                 android:textSize="10sp"
@@ -250,14 +310,15 @@
                 android:id="@+id/habit_btn_3"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="4dp"
+                android:layout_marginStart="5dp"
                 android:layout_weight="1"
-                android:background="@drawable/widget_item_bg"
+                android:background="@drawable/widget_ctrl_pill"
                 android:ellipsize="end"
                 android:gravity="center"
+                android:letterSpacing="0.06"
                 android:maxLines="1"
-                android:paddingTop="5dp"
-                android:paddingBottom="5dp"
+                android:paddingTop="7dp"
+                android:paddingBottom="7dp"
                 android:text=""
                 android:textColor="#FFFFFF"
                 android:textSize="10sp"
@@ -277,9 +338,10 @@
 
         <ImageView
             android:id="@+id/habit_empty_icon"
-            android:layout_width="34dp"
-            android:layout_height="34dp"
-            android:layout_marginBottom="6dp"
+            android:layout_width="42dp"
+            android:layout_height="42dp"
+            android:layout_marginBottom="10dp"
+            android:alpha="0.45"
             android:contentDescription="@string/widget_sensor_icon_desc"
             android:src="@drawable/widget_icon_steps" />
 
@@ -287,24 +349,26 @@
             android:id="@+id/habit_empty_btn"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:background="@drawable/widget_login_btn_bg"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp"
-            android:paddingTop="5dp"
-            android:paddingBottom="5dp"
+            android:background="@drawable/widget_slot_dash"
+            android:letterSpacing="0.08"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:paddingTop="7dp"
+            android:paddingBottom="7dp"
             android:text="+ LINK HABIT"
             android:textColor="#D71921"
-            android:textSize="11sp"
+            android:textSize="10sp"
             android:textStyle="bold" />
 
         <TextView
             android:id="@+id/habit_empty_hint"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
+            android:layout_marginTop="7dp"
             android:gravity="center"
+            android:letterSpacing="0.06"
             android:text=""
-            android:textColor="#666666"
+            android:textColor="#5F5F5F"
             android:textSize="8sp" />
     </LinearLayout>
 

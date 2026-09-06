@@ -104,6 +104,25 @@ class WidgetBridge(reactContext: ReactApplicationContext) : ReactContextBaseJava
     }
 
     /**
+     * Every habit without a dedicated widget, for the wrapper widget to bind to.
+     *
+     * A separate blob from sensorData because the shapes differ in kind: sensorData
+     * is five fixed slots, this is a list of unknown length that a widget instance
+     * picks one entry out of by id.
+     */
+    @ReactMethod
+    fun setHabitsData(data: String) {
+        try {
+            WidgetContract.prefs(reactApplicationContext).edit()
+                .putString(WidgetContract.KEY_HABITS_DATA, data)
+                .apply()
+            HabitLinkWidget.refreshAll(reactApplicationContext)
+        } catch (e: Exception) {
+            Log.e("WidgetBridge", "Error updating habits data", e)
+        }
+    }
+
+    /**
      * Config the foreground service needs: the Digital Sunset window, the noise
      * threshold, and which habit id owns each slot.
      *
@@ -240,6 +259,41 @@ class WidgetBridge(reactContext: ReactApplicationContext) : ReactContextBaseJava
             promise.resolve(FocusTimer.historyJson(reactApplicationContext))
         } catch (e: Exception) {
             promise.reject("focus_history", e)
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Habit timers
+    // -----------------------------------------------------------------------
+    //
+    // The app screen is one of three owners of a TIMER habit's countdown, alongside
+    // the wrapper widget and the expiry alarm. It reads and moves the same native
+    // state machine rather than keeping a timer of its own, which is the entire fix
+    // for the old setInterval that only advanced while the screen was mounted.
+
+    /** @param goalSeconds the habit's daily goal; an idle timer adopts it. */
+    @ReactMethod
+    fun getHabitTimer(habitId: String, goalSeconds: Double, promise: Promise) {
+        try {
+            val state = HabitTimer.read(
+                reactApplicationContext, habitId, (goalSeconds * 1000).toLong()
+            )
+            promise.resolve(state.json().toString())
+        } catch (e: Exception) {
+            promise.reject("habit_timer_state", e)
+        }
+    }
+
+    /** @param op one of the WidgetContract.HT_OP_* values. */
+    @ReactMethod
+    fun habitTimerOp(habitId: String, op: String, goalSeconds: Double, promise: Promise) {
+        try {
+            val state = HabitTimer.handle(
+                reactApplicationContext, habitId, op, (goalSeconds * 1000).toLong()
+            )
+            promise.resolve(state.json().toString())
+        } catch (e: Exception) {
+            promise.reject("habit_timer_op", e)
         }
     }
 

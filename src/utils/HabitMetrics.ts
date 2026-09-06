@@ -1,4 +1,5 @@
 import type { Habit } from '../store/useAppStore';
+import { habitSlot } from '../services/WidgetContract';
 import type { WidgetControl, WidgetDisplayMode } from '../services/WidgetContract';
 
 /**
@@ -26,8 +27,9 @@ export const habitGoal = (habit: Habit): number => {
 };
 
 export const habitDisplayMode = (habit: Habit): WidgetDisplayMode => {
-    if (habit.sensorType === 'screen') return 'sunset';
-    if (habit.sensorType === 'gps' || habit.numericUnit === 'km') return 'distance';
+    const slot = habitSlot(habit);
+    if (slot === 'screen') return 'sunset';
+    if (slot === 'gps' || habit.numericUnit === 'km') return 'distance';
     if (habit.type === 'timer') return 'duration';
     return 'int';
 };
@@ -39,7 +41,7 @@ export const habitDisplayMode = (habit: Habit): WidgetDisplayMode => {
  * than 1, a tenth of a kilometre, five minutes of a timer.
  */
 export const habitStep = (habit: Habit): number => {
-    switch (habit.sensorType) {
+    switch (habitSlot(habit)) {
         case 'pedometer': return 100;
         case 'movement': return 10;
         case 'gps': return 0.1;
@@ -84,9 +86,16 @@ export const formatHabitValue = (habit: Habit, date: string): string => {
  */
 export const SENSOR_DERIVED_TYPES = ['pedometer', 'movement', 'gps'] as const;
 
-export const isSensorDerived = (habit: Pick<Habit, 'sensorType'>): boolean =>
-    !!habit.sensorType &&
-    (SENSOR_DERIVED_TYPES as readonly string[]).includes(habit.sensorType);
+/**
+ * Asked via habitSlot, so a habit whose sensorType went missing but whose
+ * templateId survived is still recognised as sensor-measured. Reading the raw field
+ * meant City Glider fell back to a hand-editable counter with + and − buttons,
+ * offering to let the user type in a distance the GPS was supposed to measure.
+ */
+export const isSensorDerived = (habit: Pick<Habit, 'sensorType' | 'templateId'>): boolean => {
+    const slot = habitSlot(habit);
+    return !!slot && (SENSOR_DERIVED_TYPES as readonly string[]).includes(slot);
+};
 
 /**
  * Which control buttons this habit should offer, in draw order.
@@ -105,6 +114,9 @@ export const habitControls = (habit: Habit): WidgetControl[] => {
     // silence nobody was silent for. Same two controls in both places.
     if (habit.sensorType === 'noise') return ['track', 'check'];
     if (habit.type === 'check') return ['check'];
-    if (habit.type === 'timer') return ['timer', 'check'];
+    // A TIMER habit's widget drives the same native countdown the app screen does,
+    // so the controls are the run itself rather than "+5 minutes" — which banked
+    // minutes nobody spent and is why the old timer was never trustworthy.
+    if (habit.type === 'timer') return ['run', 'reset', 'check'];
     return ['dec', 'inc'];
 };

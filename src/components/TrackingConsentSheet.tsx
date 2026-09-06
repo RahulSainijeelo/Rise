@@ -5,6 +5,7 @@ import { NothingText } from './NothingText';
 import { NothingButton } from './NothingButton';
 import { Activity, Bell, MapPin, Mic, BatteryCharging, Hourglass, Check, ChevronRight } from 'lucide-react-native';
 import { sensorService } from '../services/SensorService';
+import { habitSlot, type SensorSlot } from '../services/WidgetContract';
 
 /**
  * TrackingConsentSheet
@@ -76,8 +77,15 @@ export const TrackingConsentSheet: React.FC<Props> = ({ visible, habits, onDone 
      * quietly stops the counting a few minutes after the screen goes off.
      */
     const items: ConsentItem[] = React.useMemo(() => {
+        // habitSlot rather than the raw sensorType, and no isSensorBased filter: this
+        // sheet is often the *first* thing a profile sees, before anything has had a
+        // chance to repair a habit whose sensorType went missing. Missing the slot
+        // here means never asking for the permission, which is how City Glider ended
+        // up measuring nothing at all.
         const types = new Set(
-            (habits || []).filter((h: any) => h?.isSensorBased).map((h: any) => h.sensorType)
+            (habits || [])
+                .map((h: any) => habitSlot(h))
+                .filter((slot): slot is SensorSlot => slot !== null)
         );
         const list: ConsentItem[] = [];
 

@@ -3,17 +3,19 @@ import { HomeScreen } from '../screens/HomeScreen';
 import { TasksScreen } from '../screens/TasksScreen';
 import { HabitsScreen } from '../screens/HabitsScreen';
 import FocusScreen from '../screens/FocusScreen';
+import DeckScreen from '../screens/DeckScreen';
 import { View, Platform, Image, StyleSheet } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Timer } from 'lucide-react-native';
 import { useTheme } from '../theme';
+import { DotClockIcon, DotDeckIcon } from '../components/DotMatrixIcons';
 
 // Import the PNG icons
 const HomeIcon = require('../assets/tabs/home_tracker_1.png');
 const TasksIcon = require('../assets/tabs/todo_tracker.png');
 const HabitsIcon = require('../assets/tabs/todo_habit.png');
-// Focus has no dot-matrix PNG of its own, so it borrows a vector icon rather than
-// shipping a mismatched raster one.
+// Focus and Deck have no dot-matrix PNG of their own, so they are drawn as dot
+// matrices in SVG instead. They used to borrow lucide outlines, which put two
+// hairline vector glyphs in a row of dotted ones.
 
 const Tab = createBottomTabNavigator();
 
@@ -84,12 +86,25 @@ export const TabNavigator = ({ navigation }: any) => {
                     }}
                 />
                 <Tab.Screen
+                    name="Deck"
+                    component={DeckScreen}
+                    options={{
+                        tabBarIcon: ({ focused }) => (
+                            <DotDeckIcon
+                                size={26}
+                                color={getIconTint(focused)}
+                                opacity={focused ? 1 : 0.7}
+                            />
+                        ),
+                    }}
+                />
+                <Tab.Screen
                     name="Focus"
                     component={FocusScreen}
                     options={{
                         tabBarIcon: ({ focused }) => (
-                            <Timer
-                                size={26}
+                            <DotClockIcon
+                                size={28}
                                 color={getIconTint(focused)}
                                 opacity={focused ? 1 : 0.7}
                             />

@@ -179,14 +179,22 @@ class HabitLinkWidget : AppWidgetProvider() {
          * models is how double-counting starts.
          */
         @JvmStatic
-        fun habits(context: Context): JSONArray = try {
-            JSONArray(
-                WidgetContract.prefs(context).getString(WidgetContract.KEY_HABITS_DATA, "[]")
-                    ?: "[]"
-            )
-        } catch (e: Exception) {
-            Log.w(TAG, "Unreadable habits blob", e)
-            JSONArray()
+        fun habits(context: Context): JSONArray {
+            // Login gate: without it a signed-out device keeps the previous user's
+            // habits on the home screen, because JS clearWidgetData does not empty
+            // KEY_HABITS_DATA. The sensor renders and the task widget already gate on
+            // WidgetContract.isLoggedIn; mirror that here. Returning nothing makes
+            // habitById() miss, so updateWidget falls through to its empty face.
+            if (!WidgetContract.isLoggedIn(context)) return JSONArray()
+            return try {
+                JSONArray(
+                    WidgetContract.prefs(context).getString(WidgetContract.KEY_HABITS_DATA, "[]")
+                        ?: "[]"
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "Unreadable habits blob", e)
+                JSONArray()
+            }
         }
 
         /** The published habit with this id, or null if it has been deleted since. */

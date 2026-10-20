@@ -42,6 +42,21 @@ const sensorNote = (habit: any, date: string): string => {
     return '';
 };
 
+/**
+ * The unit a widget prints next to a habit's numbers.
+ *
+ * A timer habit stores seconds and renders as whole minutes (displayMode
+ * 'duration') but carries no `numericUnit`, so the old `(habit.numericUnit || '')`
+ * shipped an empty unit and the widget drew the number with nothing after it
+ * (W-01). Fall back to MIN for duration habits; distance/int slots render their own
+ * suffix natively, so an empty string is correct for those.
+ */
+const widgetUnit = (habit: any): string => {
+    if (habit.numericUnit) return String(habit.numericUnit).toUpperCase();
+    if (habit.type === 'timer' || habitDisplayMode(habit) === 'duration') return 'MIN';
+    return '';
+};
+
 export interface WidgetItem {
     id: string;
     title: string;
@@ -130,16 +145,21 @@ export const WidgetService = {
 
             // Sync Habit History (last 35 days for heatmap)
             if (typeof WidgetBridge.setHabitHistoryData === 'function') {
+                // Compute the 35 window dates ONCE from a single dayjs base, then test
+                // each habit's completion with a Set (O(1)) instead of Array.includes
+                // (O(history)) inside the inner loop. The old code did
+                // habits × 35 × includes() plus 35 fresh dayjs() allocations per habit,
+                // which, with many habits, is a real contributor to the switch lag (B5).
+                const base = dayjs();
+                const windowDates: string[] = [];
+                for (let i = 0; i < 35; i++) {
+                    windowDates.push(base.subtract(34 - i, 'day').format('YYYY-MM-DD'));
+                }
+
                 const habitHistory: any = {};
                 (habits || []).forEach(h => {
-                    const history = [];
-                    for (let i = 0; i < 35; i++) {
-                        const date = dayjs().subtract(34 - i, 'day').format('YYYY-MM-DD');
-                        history.push({
-                            date,
-                            completed: h.completedDates?.includes(date) || false
-                        });
-                    }
+                    const done = new Set<string>(h.completedDates || []);
+                    const history = windowDates.map(date => ({ date, completed: done.has(date) }));
                     habitHistory[h.id] = {
                         title: h.title,
                         history,
@@ -193,7 +213,7 @@ export const WidgetService = {
                     habitType: habit.type || 'check',
                     progress: habitProgress(habit, today),
                     goal: habitGoal(habit),
-                    unit: (habit.numericUnit || '').toUpperCase(),
+                    unit: widgetUnit(habit),
                     step: habitStep(habit),
                     displayMode: habitDisplayMode(habit),
                     goalDirection: habit.goalDirection || 'atLeast',
@@ -230,7 +250,7 @@ export const WidgetService = {
                         habitType: habit.type || 'check',
                         progress: habitProgress(habit, today),
                         goal: habitGoal(habit),
-                        unit: (habit.numericUnit || '').toUpperCase(),
+                        unit: widgetUnit(habit),
                         step: habitStep(habit),
                         displayMode: habitDisplayMode(habit),
                         goalDirection: habit.goalDirection || 'atLeast',
@@ -269,6 +289,20 @@ export const WidgetService = {
                 };
                 SENSOR_SLOTS.forEach(slot => { cleared[slot] = { exists: false }; });
                 WidgetBridge.setSensorData(JSON.stringify(cleared));
+            }
+            // The wrapper-widget list, the heatmap history and the timer face are
+            // three more independent payloads. Clearing only setWidgetData/setSensorData
+            // left HabitLinkWidget listing the previous user's habits, the heatmap
+            // showing their completions, and a stale countdown on the timer widget
+            // after logout (W-03).
+            if (typeof WidgetBridge.setHabitsData === 'function') {
+                WidgetBridge.setHabitsData(JSON.stringify([]));
+            }
+            if (typeof WidgetBridge.setHabitHistoryData === 'function') {
+                WidgetBridge.setHabitHistoryData(JSON.stringify({}));
+            }
+            if (typeof WidgetBridge.setTimerData === 'function') {
+                WidgetBridge.setTimerData(JSON.stringify(null));
             }
             if (typeof WidgetBridge.setSensorConfig === 'function') {
                 WidgetBridge.setSensorConfig(JSON.stringify({}));

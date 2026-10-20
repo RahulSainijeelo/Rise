@@ -390,6 +390,12 @@ object WidgetContract {
     const val OP_TIMER_ADD = "timerAdd"
     const val OP_SUNSET_CONFIRM = "sunsetConfirm"
     const val OP_SUNSET_SLIPPED = "sunsetSlipped"
+    /**
+     * A task row toggled on the Tasks widget. Unlike the others this moves a *task*,
+     * not a habit, so JS drains it by id into the task store rather than a habit.
+     * Hand-mirrored in src/services/WidgetContract.ts — keep the string in lockstep.
+     */
+    const val OP_TASK_TOGGLE = "taskToggle"
 
     const val PENDING_OPS_MAX = 200
 

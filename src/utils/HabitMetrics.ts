@@ -112,7 +112,10 @@ export const habitControls = (habit: Habit): WidgetControl[] => {
     // Deep Silence: the microphone is the clock, so the app screen's play/pause
     // button *is* the sensor switch — a widget "add 5 minutes" button would bank
     // silence nobody was silent for. Same two controls in both places.
-    if (habit.sensorType === 'noise') return ['track', 'check'];
+    // Resolve the slot via habitSlot (templateId first), never a raw sensorType
+    // read: a Deep Silence habit whose sensorType went missing but whose templateId
+    // survived would otherwise fall through to the generic numeric +/- controls.
+    if (habitSlot(habit) === 'noise') return ['track', 'check'];
     if (habit.type === 'check') return ['check'];
     // A TIMER habit's widget drives the same native countdown the app screen does,
     // so the controls are the run itself rather than "+5 minutes" — which banked

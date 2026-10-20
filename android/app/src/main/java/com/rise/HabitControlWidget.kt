@@ -81,7 +81,14 @@ class HabitControlWidget : AppWidgetProvider() {
             val views = RemoteViews(context.packageName, R.layout.habit_control_widget)
 
             try {
-                val rows = HabitMatrix.load(context)
+                // Login gate: without it a signed-out device keeps the previous user's
+                // matrix on the home screen (JS clearWidgetData does not empty
+                // KEY_HABIT_HISTORY). The sensor renders and the task widget already gate
+                // on WidgetContract.isLoggedIn; an empty list falls through to the
+                // "NOTHING TO TRACK YET" empty face below.
+                val rows: List<HabitMatrix.Row> =
+                    if (WidgetContract.isLoggedIn(context)) HabitMatrix.load(context)
+                    else emptyList()
 
                 // Header opens the app. It is the only navigation here on purpose: a
                 // collection has a single PendingIntent template, so a row cannot mix

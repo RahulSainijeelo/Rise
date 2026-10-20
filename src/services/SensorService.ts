@@ -17,6 +17,25 @@ import { NOISE_DEFAULTS, SUNSET_DEFAULTS, habitSlot } from './WidgetContract';
 const { SensorBridge } = NativeModules;
 const hasNativeService = Platform.OS === 'android' && !!SensorBridge;
 
+/**
+ * Habits as a flat array from the store, tolerant of both the normalized shape
+ * (habitsById + habitIds, current) and a legacy flat `habits` array. The store was
+ * normalized for performance; every sensor path reads through this so the switch
+ * cannot silently leave the service seeing zero habits (which would stop every
+ * reading from being committed).
+ */
+const habitsOf = (state: any): any[] => {
+    if (state && state.habitsById && Array.isArray(state.habitIds)) {
+        const out: any[] = [];
+        for (const id of state.habitIds) {
+            const h = state.habitsById[id];
+            if (h) out.push(h);
+        }
+        return out;
+    }
+    return (state && state.habits) || [];
+};
+
 setUpdateIntervalForType(SensorTypes.accelerometer, 100);
 
 /*
@@ -295,7 +314,7 @@ class SensorService {
     startGlobalTracking(getStore: () => any) {
         this.getStore = getStore;
         const state = getStore();
-        const habits = state.habits || [];
+        const habits = habitsOf(state);
         const config = buildSensorConfig(habits);
         const json = JSON.stringify(config);
 
@@ -354,7 +373,7 @@ class SensorService {
             SensorBridge.startTracking(configJson);
         } catch (e) {
             console.warn('Native sensor service failed to start, falling back', e);
-            const habits = this.getStore?.().habits || [];
+            const habits = habitsOf(this.getStore?.());
             this.startFallbackTracking(habits);
         }
     }
@@ -404,7 +423,7 @@ class SensorService {
         const getStore = this.getStore;
         if (!getStore) return;
         const state = getStore();
-        const habits: any[] = state.habits || [];
+        const habits: any[] = habitsOf(state);
         const today = localDate();
         const d = this.live;
 
@@ -436,9 +455,20 @@ class SensorService {
                 const cur = h.numericProgress?.[date] || 0;
                 if (km > cur) state.updateSensorProgress(h.id, date, km);
             } else if (slot === 'screen') {
-                const cur = h.numericProgress?.[date] || 0;
-                const used = d.sunsetSource === 'usagestats' ? d.sunsetMinutes : d.sunsetUnlocks;
-                if (used > cur) state.updateSensorProgress(h.id, date, used);
+                // A Digital Sunset habit's progress is MINUTES of post-cutoff screen
+                // time — that is the unit its goal (allowanceMinutes) is in and the
+                // unit every surface prints ("12 / 45 MIN"). Unlocks are only a coarse
+                // proxy the service falls back to when UsageStats is not granted;
+                // committing an unlock *count* into the same minutes-denominated field
+                // made "3 / 45 MIN" compare three unlocks against a forty-five-minute
+                // allowance, and flipped the held/slipped verdict on a unit mismatch
+                // (H-03). Only auto-commit the authoritative minutes reading. Without
+                // UsageStats the habit stands on its confirm/slipped controls rather
+                // than a mismeasured number — honest beats precise-looking-but-wrong.
+                if (d.sunsetSource === 'usagestats') {
+                    const cur = h.numericProgress?.[date] || 0;
+                    if (d.sunsetMinutes > cur) state.updateSensorProgress(h.id, date, d.sunsetMinutes);
+                }
             } else if (slot === 'noise' && d.live) {
                 // In native mode the service owns the silence clock. In fallback
                 // mode startNoiseAccrual does, so this must not double-count.
@@ -526,7 +556,8 @@ class SensorService {
             }
 
             const state = getStore();
-            const habit = (state.habits || []).find((h: any) => h.id === habitId);
+            const habit = (state.habitsById && state.habitsById[habitId]) ||
+                habitsOf(state).find((h: any) => h.id === habitId);
             if (!habit) return;
             const today = localDate();
             if (habit.completedDates?.includes(today)) return;

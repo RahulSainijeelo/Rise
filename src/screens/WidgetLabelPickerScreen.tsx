@@ -11,7 +11,10 @@ const WidgetBridge = NativeModules.WidgetBridge;
 
 export const WidgetLabelPickerScreen = ({ navigation }: any) => {
     const { theme } = useTheme();
-    const { labels } = useAppStore();
+    // Narrow selector: this picker only cares about labels, so subscribing to the
+    // whole store (`const { labels } = useAppStore()`) re-rendered the sheet on
+    // every unrelated change — a habit tick, a timer second, a widget push (W-07).
+    const labels = useAppStore(s => s.labels);
     const [selectedLabel, setSelectedLabel] = useState<string>('All');
 
     // Handle back button to close

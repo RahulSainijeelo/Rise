@@ -1467,6 +1467,16 @@ class SensorForegroundService : Service(), SensorEventListener {
             })
         }
 
+        // NOTE (movement vs steps): the pedometer and movement slots are intentionally
+        // fed the SAME daily step total. This hardware exposes only a step
+        // counter/detector; there is no distinct "movement" signal anywhere on the
+        // native side (no accelerometer-activity, cadence or pace metric is computed).
+        // A direct consequence: "Immediate Rise" (the movement template, goal 60)
+        // completes after ~60 steps -- the same first 60 steps that also begin Step
+        // Legend's 10,000-step goal. Distinguishing the two is a PRODUCT / naming
+        // decision (rename the movement template, or add a real movement metric), NOT a
+        // code bug to silently "fix" here by fabricating an unverifiable value. Flagged
+        // to the user separately; left unchanged on purpose.
         slot(WidgetContract.SLOT_PEDOMETER, steps.toDouble(), stepNote(), today)
         slot(WidgetContract.SLOT_MOVEMENT, steps.toDouble(), stepNote(), today)
         slot(WidgetContract.SLOT_GPS, distanceMeters / 1000.0, gpsNote(), today)

@@ -12,7 +12,7 @@ import dayjs from 'dayjs';
 export const GlobalHeader = ({ navigation }: any) => {
     const { theme } = useTheme();
     const insets = useSafeAreaInsets();
-    const { activeProfile } = useAppStore();
+    const activeProfile = useAppStore((s) => s.activeProfile);
     const [currentTime, setCurrentTime] = useState(dayjs().format('HH:mm'));
 
     const fullText = "Rise";

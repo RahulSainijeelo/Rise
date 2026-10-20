@@ -91,7 +91,23 @@ class RiseWidget : AppWidgetProvider() {
                     }
                     context.startActivity(habitIntent)
                 } else {
-                    // Toggle the task in SharedPreferences
+                    // Queue the durable op JS drains into the real task store, THEN flip
+                    // the widget's own copy so the row responds under the finger. Without
+                    // the enqueue the prefs flip is cosmetic: nothing reads widgetData back
+                    // and the next updateWidget overwrites it, so the toggle is lost. This
+                    // mirrors HabitControlWidget.toggleToday (enqueue first, optimistic
+                    // flip second); JS owns widgetData and rewrites it wholesale on its
+                    // next sync having applied this same op, so the flip cannot double-count.
+                    WidgetContract.enqueueOp(
+                        context,
+                        WidgetContract.OP_TASK_TOGGLE,
+                        itemId,
+                        "",
+                        0.0,
+                        WidgetContract.localDate()
+                    )
+
+                    // Toggle the task in SharedPreferences (optimistic under-finger feedback)
                     toggleItemInPrefs(context, itemId, itemType)
 
                     // Refresh widget
@@ -116,8 +132,8 @@ class RiseWidget : AppWidgetProvider() {
 
     private fun toggleItemInPrefs(context: Context, itemId: String, itemType: String) {
         try {
-            val sharedPref = context.getSharedPreferences("RiseWidgetPrefs", Context.MODE_PRIVATE)
-            val dataString = sharedPref.getString("widgetData", "[]") ?: "[]"
+            val sharedPref = context.getSharedPreferences(WidgetContract.PREFS_NAME, Context.MODE_PRIVATE)
+            val dataString = sharedPref.getString(WidgetContract.KEY_WIDGET_DATA, "[]") ?: "[]"
             val items = JSONArray(dataString)
             
             for (i in 0 until items.length()) {
@@ -131,7 +147,7 @@ class RiseWidget : AppWidgetProvider() {
             }
             
             with(sharedPref.edit()) {
-                putString("widgetData", items.toString())
+                putString(WidgetContract.KEY_WIDGET_DATA, items.toString())
                 apply()
             }
             Log.d("RiseWidget", "Toggled item $itemId")

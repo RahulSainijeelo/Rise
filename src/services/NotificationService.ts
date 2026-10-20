@@ -1,5 +1,21 @@
 import notifee, { AndroidImportance, TriggerType, TimestampTrigger, RepeatFrequency } from '@notifee/react-native';
 import dayjs from 'dayjs';
+import customParseFormat from 'dayjs/plugin/customParseFormat';
+
+// scheduleTaskReminders parses times with an explicit format string
+// (e.g. 'YYYY-MM-DD HH:mm'); dayjs only honours that format with this plugin loaded.
+dayjs.extend(customParseFormat);
+
+/**
+ * Outcome of a (re)schedule call so callers can react instead of failing silently.
+ * `ok` is false only when reminders were requested but could not be anchored to a
+ * valid date/time (so nothing was scheduled).
+ */
+export interface ScheduleReminderResult {
+    ok: boolean;
+    scheduledCount: number;
+    skippedReason?: 'no-reminders' | 'missing-date' | 'invalid-date';
+}
 
 class NotificationService {
     private channelId: string | null = null;
@@ -32,6 +48,8 @@ class NotificationService {
         title: string;
         body: string;
         triggerTime: Date;
+        /** When set, the notification repeats at this cadence instead of firing once. */
+        repeat?: RepeatFrequency;
         data?: Record<string, string>;
     }) {
         await this.init();
@@ -39,6 +57,7 @@ class NotificationService {
         const trigger: TimestampTrigger = {
             type: TriggerType.TIMESTAMP,
             timestamp: params.triggerTime.getTime(),
+            ...(params.repeat !== undefined ? { repeatFrequency: params.repeat } : {}),
         };
 
         await notifee.createTriggerNotification(
@@ -62,28 +81,45 @@ class NotificationService {
         console.log(`Scheduled notification "${params.title}" for ${params.triggerTime}`);
     }
 
-    // Schedule reminders for a task
-    async scheduleTaskReminders(task: {
-        id: string;
-        title: string;
-        dueDate?: string;
-        dueTime?: string;
-        reminders: string[];
-    }) {
-        if (!task.dueDate || !task.reminders || task.reminders.length === 0) {
-            console.log('No reminders to schedule - missing date or reminders');
-            return;
-        }
-
-        // Cancel any existing reminders for this task
+    // Schedule reminders for a task.
+    //
+    // Always cancels existing reminders first, so calling this with an empty
+    // `reminders` array is the supported way to CLEAR a task's reminders (T-02).
+    // Task reminders are offsets from a specific due datetime, so they are
+    // correctly one-shot; recurrence belongs to habits (see scheduleHabitReminders).
+    async scheduleTaskReminders(
+        task: {
+            id: string;
+            title: string;
+            dueDate?: string;
+            dueTime?: string;
+            reminders: string[];
+        },
+        opts?: { announce?: boolean }
+    ): Promise<ScheduleReminderResult> {
+        // Cancel first and unconditionally, so a reschedule is idempotent and an
+        // empty reminder list genuinely clears what was there.
         await this.cancelTaskReminders(task.id);
+
+        if (!task.reminders || task.reminders.length === 0) {
+            return { ok: true, scheduledCount: 0, skippedReason: 'no-reminders' };
+        }
+        if (!task.dueDate) {
+            console.warn(`Task "${task.title}" has reminders but no due date; nothing scheduled.`);
+            return { ok: false, scheduledCount: 0, skippedReason: 'missing-date' };
+        }
 
         // Parse the due datetime
         const dueTimeStr = task.dueTime || '09:00'; // Default to 9 AM
         const dueDateTime = dayjs(`${task.dueDate} ${dueTimeStr}`, 'YYYY-MM-DD HH:mm');
+        if (!dueDateTime.isValid()) {
+            console.warn(`Task "${task.title}" due date/time did not parse; nothing scheduled.`);
+            return { ok: false, scheduledCount: 0, skippedReason: 'invalid-date' };
+        }
 
         console.log(`Scheduling reminders for "${task.title}" due at ${dueDateTime.format()}`);
 
+        let scheduledCount = 0;
         for (const reminder of task.reminders) {
             let triggerTime: dayjs.Dayjs | null = null;
 
@@ -124,35 +160,54 @@ class NotificationService {
                     triggerTime: triggerTime.toDate(),
                     data: { taskId: task.id, type: 'task' },
                 });
+                scheduledCount += 1;
             } else {
                 console.log(`Skipping reminder "${reminder}" - time ${triggerTime.format()} is in the past`);
             }
         }
 
-        // Show immediate confirmation that reminders were set
-        await this.showNow('✅ Reminders Set', `${task.reminders.length} reminder(s) for "${task.title}"`);
+        // Only announce when the caller explicitly asks (e.g. an explicit Save),
+        // never on incidental reschedules like time-dial drags (T-04).
+        if (opts?.announce && scheduledCount > 0) {
+            await this.showNow('✅ Reminders Set', `${scheduledCount} reminder(s) for "${task.title}"`);
+        }
+        return { ok: true, scheduledCount };
     }
 
-    // Schedule reminders for a habit
+    // Schedule reminders for a habit.
+    //
+    // Habit reminders are times of day, so they REPEAT (daily, or weekly for a
+    // weekly habit) rather than firing once — the previous one-shot behaviour is
+    // why a "daily" reminder only ever fired on the day the habit was created
+    // (T-05). Cancels first, so this is also the way to re-sync a habit's reminders
+    // after an edit, and an empty list clears them.
     async scheduleHabitReminders(habit: {
         id: string;
         title: string;
         reminders: string[];
         frequency: string;
-    }) {
-        if (!habit.reminders || habit.reminders.length === 0) {
-            return;
-        }
-
-        // Cancel existing reminders
+    }): Promise<ScheduleReminderResult> {
         await this.cancelHabitReminders(habit.id);
 
+        if (!habit.reminders || habit.reminders.length === 0) {
+            return { ok: true, scheduledCount: 0, skippedReason: 'no-reminders' };
+        }
+
+        const repeat =
+            habit.frequency === 'weekly' ? RepeatFrequency.WEEKLY : RepeatFrequency.DAILY;
+
         // For habits, reminders are times of day (e.g., '08:00', '20:00')
+        let scheduledCount = 0;
         for (const reminderTime of habit.reminders) {
             const [hours, minutes] = reminderTime.split(':').map(Number);
+            if (Number.isNaN(hours) || Number.isNaN(minutes)) {
+                console.warn(`Habit "${habit.title}" has an unparseable reminder time: ${reminderTime}`);
+                continue;
+            }
 
-            // Schedule for today or tomorrow if time has passed
-            let triggerTime = dayjs().hour(hours).minute(minutes).second(0);
+            // Anchor the FIRST fire today, or tomorrow if the time already passed;
+            // repeatFrequency then carries it forward each day/week.
+            let triggerTime = dayjs().hour(hours).minute(minutes).second(0).millisecond(0);
             if (triggerTime.isBefore(dayjs())) {
                 triggerTime = triggerTime.add(1, 'day');
             }
@@ -162,9 +217,13 @@ class NotificationService {
                 title: '💪 Habit Reminder',
                 body: `Time for: ${habit.title}`,
                 triggerTime: triggerTime.toDate(),
+                repeat,
                 data: { habitId: habit.id, type: 'habit' },
             });
+            scheduledCount += 1;
         }
+
+        return { ok: true, scheduledCount };
     }
 
     // Cancel all reminders for a task

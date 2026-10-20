@@ -13,6 +13,7 @@ import { NothingInput } from '../components/NothingInput';
 import { ConfirmationModal } from '../components/ConfirmationModal';
 import { NoiseCalibrator } from '../components/NoiseCalibrator';
 import { useAppStore } from '../store/useAppStore';
+import { useHabit } from '../store/selectors';
 import { SoundService } from '../services/SoundService';
 const { width } = Dimensions.get('window');
 const CIRCLE_SIZE = width * 0.7;
@@ -34,15 +35,20 @@ import {
     formatHabitValue,
     isOverLimit as habitIsOverLimit,
     habitProgress,
+    habitGoal,
     habitDisplayMode,
+    isInverseGoal,
     isSensorDerived,
 } from '../utils/HabitMetrics';
 
 export const HabitDetailScreen = ({ route, navigation }: any) => {
     const { habitId } = route.params;
     const { theme } = useTheme();
-    const { habits, updateHabit, deleteHabit, toggleHabit } = useAppStore();
-    const habit = habits.find(h => h.id === habitId);
+    const { updateHabit, deleteHabit, toggleHabit } = useAppStore();
+    // Direct O(1) lookup against the normalized store, and this screen now
+    // re-renders only when *this* habit changes rather than on every habit edit
+    // anywhere (the old `habits.find` subscribed to the whole list). (SET G)
+    const habit = useHabit(habitId);
 
     // The countdown is native state, not React state.
     //
@@ -63,6 +69,16 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
     const [editTitle, setEditTitle] = useState(habit?.title || '');
     const [editGoal, setEditGoal] = useState(((habit?.timerGoal || 0) / 60).toString());
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+    // History grid: the streak view (binary done/missed) or the full view (how much of
+    // each day's goal was actually done, even on days that fell short). Only habits that
+    // store a per-day value — numeric and timer, sensor ones included — can offer the
+    // full view; a plain check habit has nothing to show but done/not-done, so it never
+    // sees the toggle and stays on the streak grid.
+    const [historyFull, setHistoryFull] = useState(false);
+    // Which day's exact figure to spell out under the full grid. A cell is a shaded
+    // square; tapping it answers "how much, that day" without cramming a number into 14px.
+    const [peekDate, setPeekDate] = useState<string | null>(null);
 
     // Sensor State
     //
@@ -351,6 +367,73 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
 
     const numericStep = habitStep(habit);
     const isOverLimit = habitIsOverLimit(habit, today);
+
+    // ── History ──────────────────────────────────────────────────────────────
+    //
+    // The streak grid answers "did you do it"; the full grid answers "how much did you
+    // do", day by day, so a count habit you never quite finished still shows the 5 of 8
+    // glasses or the 5,000 steps you managed. Only the two value-bearing types can tell
+    // that story — a plain check habit has no partial figure — so the toggle appears for
+    // them, sensor-measured ones included.
+    //
+    // Inverse ("at most") goals are deliberately left on the streak grid. habitProgress
+    // reports 0 for a day with no entry, and under a limit a 0 is ambiguous — it could be
+    // "stayed off it all day" (the best possible day) or "nothing was recorded" — so the
+    // intensity shading can't colour that day honestly. completedDates already carries the
+    // held/slipped verdict the streak grid draws, so that stays the truthful view for them.
+    const inverse = isInverseGoal(habit);
+    const dayGoal = habitGoal(habit);
+    const hasProgressHistory = (habit.type === 'numeric' || habit.type === 'timer') && !inverse;
+
+    /**
+     * A single day's figures for the full grid: the raw value, the goal, how full the
+     * cell should read (0..1), whether the day met its target, and a spelled-out
+     * "5 / 8 GLASSES" for the peek line.
+     *
+     * duration is the one display mode where the stored number (seconds) and the shown
+     * number (minutes) differ, so its value, goal and unit are all converted together
+     * rather than run through formatHabitValue, which would format the value in minutes
+     * while habitGoal handed back seconds.
+     */
+    const describeDay = (date: string) => {
+        const value = habitProgress(habit, date);
+        const mode = habitDisplayMode(habit);
+
+        let valueText: string;
+        let goalText: string;
+        let unit: string;
+        if (mode === 'duration') {
+            valueText = `${Math.floor(value / 60)}`;
+            goalText = `${Math.floor(dayGoal / 60)}`;
+            unit = 'MIN';
+        } else if (mode === 'distance') {
+            const km = value;
+            valueText = km < 1 ? `${Math.round(km * 1000)}` : km.toFixed(1);
+            goalText = `${dayGoal}`;
+            unit = km < 1 ? 'M' : (habit.numericUnit || 'KM').toUpperCase();
+        } else {
+            valueText = `${Math.round(value)}`;
+            goalText = `${Math.round(dayGoal)}`;
+            unit = (habit.numericUnit || '').toUpperCase();
+        }
+
+        // Fullness, always 0..1. For an inverse ("at most") goal the cell fills as the
+        // day is held and empties as the allowance is spent, so a quiet day is full and
+        // a blown limit is empty — the opposite of a count habit, and the reason the two
+        // cannot share one ratio.
+        const raw = dayGoal > 0 ? value / dayGoal : value > 0 ? 1 : 0;
+        const ratio = inverse
+            ? Math.max(0, 1 - raw)
+            : Math.min(1, raw);
+
+        // "Met" means the day counts as a win: under-or-equal for a limit, at-or-over for
+        // a target. A day with no progress at all never counts as met, limit or not.
+        const met = inverse
+            ? dayGoal > 0 && value <= dayGoal
+            : value >= dayGoal && dayGoal > 0;
+
+        return { value, ratio, met, valueText, goalText, unit };
+    };
 
     /**
      * Deep Silence's numbers, all of them persistent.
@@ -1021,32 +1104,168 @@ export const HabitDetailScreen = ({ route, navigation }: any) => {
                     </View>
                 )}
 
-                <NothingText variant="bold" size={14} style={styles.sectionTitle}>HISTORY</NothingText>
+                <View style={styles.historyHeader}>
+                    <NothingText variant="bold" size={14} style={styles.sectionTitle}>HISTORY</NothingText>
+                    {hasProgressHistory && (
+                        <View style={[styles.historyToggle, { borderColor: theme.colors.border }]}>
+                            {([['streak', 'STREAK'], ['full', 'PROGRESS']] as const).map(([key, label]) => {
+                                const on = (key === 'full') === historyFull;
+                                return (
+                                    <TouchableOpacity
+                                        key={key}
+                                        onPress={() => {
+                                            setHistoryFull(key === 'full');
+                                            setPeekDate(null);
+                                        }}
+                                        style={[
+                                            styles.historyToggleBtn,
+                                            on && { backgroundColor: theme.colors.surface2 },
+                                        ]}
+                                    >
+                                        <NothingText
+                                            variant="bold"
+                                            size={9}
+                                            color={on ? theme.colors.text : theme.colors.textSecondary}
+                                            style={{ letterSpacing: 1.4 }}
+                                        >
+                                            {label}
+                                        </NothingText>
+                                    </TouchableOpacity>
+                                );
+                            })}
+                        </View>
+                    )}
+                </View>
+
                 <NothingCard style={styles.historyCard}>
-                    <View style={styles.heatmap}>
-                        {Array.from({ length: 35 }).map((_, i) => {
-                            const date = dayjs().subtract(34 - i, 'day').format('YYYY-MM-DD');
-                            const active = habit.completedDates.includes(date);
-                            const isPast = dayjs(date).isBefore(dayjs(), 'day');
-                            const missed = isPast && !active;
-                            return (
-                                <View
-                                    key={i}
-                                    style={[
-                                        styles.heatDot,
-                                        {
-                                            backgroundColor: active
-                                                ? theme.colors.text
-                                                : missed
-                                                    ? theme.colors.error
-                                                    : theme.colors.surface2,
-                                            opacity: active ? 1 : missed ? 0.3 : 0.5
-                                        }
-                                    ]}
-                                />
-                            );
-                        })}
-                    </View>
+                    {historyFull && hasProgressHistory ? (
+                        <>
+                            <View style={styles.heatmap}>
+                                {Array.from({ length: 35 }).map((_, i) => {
+                                    const date = dayjs().subtract(34 - i, 'day').format('YYYY-MM-DD');
+                                    const isFuture = dayjs(date).isAfter(dayjs(), 'day');
+                                    const { ratio, met, value } = describeDay(date);
+                                    const selected = peekDate === date;
+
+                                    // A future day is a faint placeholder — nothing has
+                                    // happened yet. A past/today cell with any progress is
+                                    // tinted by how full it got; one with none reads like a
+                                    // missed day on the streak grid, so the two views line up.
+                                    const hasProgress = value > 0;
+                                    const tint = met ? theme.colors.success : theme.colors.primary;
+                                    const bg = isFuture
+                                        ? theme.colors.surface2
+                                        : hasProgress
+                                            ? tint
+                                            : theme.colors.error;
+                                    const opacity = isFuture
+                                        ? 0.35
+                                        : hasProgress
+                                            // Floor the fill so even a token amount is visibly
+                                            // more than a blank day, then scale with the ratio.
+                                            ? 0.25 + 0.75 * Math.max(0, Math.min(1, ratio))
+                                            : 0.3;
+
+                                    return (
+                                        <TouchableOpacity
+                                            key={i}
+                                            activeOpacity={0.7}
+                                            disabled={isFuture}
+                                            onPress={() => setPeekDate(selected ? null : date)}
+                                            style={[
+                                                styles.heatDot,
+                                                {
+                                                    backgroundColor: bg,
+                                                    opacity,
+                                                    borderWidth: selected ? 1.5 : 0,
+                                                    borderColor: theme.colors.text,
+                                                },
+                                            ]}
+                                        />
+                                    );
+                                })}
+                            </View>
+
+                            {/* The exact figure for whichever cell was tapped, or a prompt
+                                to tap one. This is where "5 / 8 glasses" actually gets read;
+                                the squares only carry the shape of the month. */}
+                            {(() => {
+                                if (!peekDate) {
+                                    return (
+                                        <NothingText
+                                            size={11}
+                                            color={theme.colors.textSecondary}
+                                            style={{ marginTop: 14, textAlign: 'center' }}
+                                        >
+                                            Tap a day to see how much you did.
+                                        </NothingText>
+                                    );
+                                }
+                                const d = describeDay(peekDate);
+                                return (
+                                    <View style={{ marginTop: 14, alignItems: 'center' }}>
+                                        <NothingText size={11} color={theme.colors.textSecondary} style={{ letterSpacing: 1 }}>
+                                            {dayjs(peekDate).format('ddd, D MMM').toUpperCase()}
+                                        </NothingText>
+                                        <View style={{ flexDirection: 'row', alignItems: 'flex-end', marginTop: 4 }}>
+                                            <NothingText
+                                                variant="bold"
+                                                size={20}
+                                                color={d.met ? theme.colors.success : theme.colors.text}
+                                            >
+                                                {d.valueText}
+                                            </NothingText>
+                                            <NothingText size={13} color={theme.colors.textSecondary} style={{ marginBottom: 1 }}>
+                                                {dayGoal > 0 ? ` / ${d.goalText}` : ''}{d.unit ? ` ${d.unit}` : ''}
+                                            </NothingText>
+                                        </View>
+                                        {dayGoal > 0 && (
+                                            <NothingText
+                                                size={10}
+                                                color={d.met ? theme.colors.success : theme.colors.textSecondary}
+                                                style={{ marginTop: 2, letterSpacing: 1 }}
+                                            >
+                                                {d.met ? (inverse ? 'HELD' : 'GOAL MET') : inverse ? 'OVER LIMIT' : `${Math.round(Math.min(1, d.ratio) * 100)}% OF GOAL`}
+                                            </NothingText>
+                                        )}
+                                    </View>
+                                );
+                            })()}
+
+                            <NothingText
+                                size={10}
+                                color={theme.colors.textSecondary}
+                                style={{ marginTop: 14, textAlign: 'center', lineHeight: 15 }}
+                            >
+                                {`Last 35 days. ${inverse ? 'Fuller squares are days you stayed under the limit.' : 'Fuller squares are days you did more toward the goal.'} Older days are cleared automatically.`}
+                            </NothingText>
+                        </>
+                    ) : (
+                        <View style={styles.heatmap}>
+                            {Array.from({ length: 35 }).map((_, i) => {
+                                const date = dayjs().subtract(34 - i, 'day').format('YYYY-MM-DD');
+                                const active = habit.completedDates.includes(date);
+                                const isPast = dayjs(date).isBefore(dayjs(), 'day');
+                                const missed = isPast && !active;
+                                return (
+                                    <View
+                                        key={i}
+                                        style={[
+                                            styles.heatDot,
+                                            {
+                                                backgroundColor: active
+                                                    ? theme.colors.text
+                                                    : missed
+                                                        ? theme.colors.error
+                                                        : theme.colors.surface2,
+                                                opacity: active ? 1 : missed ? 0.3 : 0.5
+                                            }
+                                        ]}
+                                    />
+                                );
+                            })}
+                        </View>
+                    )}
                 </NothingCard>
 
                 <TouchableOpacity

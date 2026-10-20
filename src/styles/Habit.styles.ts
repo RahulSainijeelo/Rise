@@ -95,6 +95,22 @@ export const HabitDetailScreenStyles = StyleSheet.create({
     historyCard: {
         padding: 16,
     },
+    historyHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    historyToggle: {
+        flexDirection: 'row',
+        borderWidth: 1,
+        borderRadius: 999,
+        padding: 2,
+    },
+    historyToggleBtn: {
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 999,
+    },
     heatmap: {
         flexDirection: 'row',
         flexWrap: 'wrap',

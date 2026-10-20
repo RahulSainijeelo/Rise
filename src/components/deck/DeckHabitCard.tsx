@@ -15,6 +15,7 @@ import {
     isOverLimit,
     isSensorDerived,
 } from '../../utils/HabitMetrics';
+import { habitSlot } from '../../services/WidgetContract';
 import {
     getHabitTimer,
     habitPendingSeconds,
@@ -65,7 +66,7 @@ const unitLabel = (habit: Habit): string => {
     }
 };
 
-export const DeckHabitCard: React.FC<Props> = ({
+export const DeckHabitCardImpl: React.FC<Props> = ({
     habit,
     active,
     onOpen,
@@ -83,8 +84,13 @@ export const DeckHabitCard: React.FC<Props> = ({
 
     const z = (n: number) => Math.round(n * scale);
 
-    const isTimer = habit.type === 'timer' && !habit.sensorType;
-    const readOnly = isSensorDerived(habit) || isInverseGoal(habit) || !!habit.sensorType;
+    // Resolve the slot via habitSlot (templateId first), never a raw sensorType read:
+    // a sensor habit whose sensorType went missing but whose templateId survived would
+    // otherwise be mistaken for a plain timer and handed +/- controls over a number the
+    // next sensor reading overwrites.
+    const slot = habitSlot(habit);
+    const isTimer = habit.type === 'timer' && !slot;
+    const readOnly = isSensorDerived(habit) || isInverseGoal(habit) || !!slot;
 
     const goalSeconds = habit.timerGoal || 0;
     const [timer, setTimer] = useState<HabitTimerState>(() =>
@@ -301,3 +307,13 @@ export const DeckHabitCard: React.FC<Props> = ({
         </View>
     );
 };
+
+/**
+ * Memoised so changing one habit repaints only that card. The normalized store keeps
+ * every unchanged habit's object identity stable, DeckScreen hands each card a stable
+ * onOpen, and `active` only flips on focus/appstate — so React.memo's shallow prop
+ * compare skips the cards whose habit did not move, including on the Deck's
+ * once-a-second clock tick. This is the Deck's half of the "lags with many habits" fix.
+ */
+export const DeckHabitCard = React.memo(DeckHabitCardImpl);
+DeckHabitCard.displayName = 'DeckHabitCard';

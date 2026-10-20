@@ -611,16 +611,6 @@ const FocusScreen: React.FC = () => {
                     );
                 })}
             </View>
-            <Text
-                style={{
-                    fontFamily: mediumFont,
-                    fontSize: 9,
-                    letterSpacing: 2,
-                    color: theme.colors.textSecondary,
-                    marginTop: 8,
-                }}>
-                RING COLOUR — ALSO APPLIES TO THE WIDGET
-            </Text>
         </View>
     );
 

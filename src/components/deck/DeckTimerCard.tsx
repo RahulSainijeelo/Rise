@@ -236,10 +236,7 @@ export const DeckTimerCard: React.FC<Props> = ({
             }>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                 <NothingText variant="bold" size={z(10)} color={theme.colors.textSecondary} style={{ letterSpacing: 2, flex: 1 }}>
-                    FOCUS TIMER
-                </NothingText>
-                <NothingText variant="bold" size={z(10)} color={labelColor} style={{ letterSpacing: 2 }}>
-                    {label}
+                    FOCUS
                 </NothingText>
                 {onOpen ? (
                     <TouchableOpacity onPress={onOpen} hitSlop={10} style={{ marginLeft: 6 }}>

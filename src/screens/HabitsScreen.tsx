@@ -7,7 +7,9 @@ import { NothingText } from '../components/NothingText';
 import { NothingCard } from '../components/NothingCard';
 import { NothingInput } from '../components/NothingInput';
 import { NothingButton } from '../components/NothingButton';
-import { useAppStore, Habit } from '../store/useAppStore';
+import { useAppStore } from '../store/useAppStore';
+import { useHabit, useHabitIds, useOccupiedSensorSlots } from '../store/selectors';
+import { habitSlot } from '../services/WidgetContract';
 import { Plus, Check, Flame, X, Timer, Heart, Sparkles, Minus, TrendingUp, Compass, User as UserIcon, Activity } from 'lucide-react-native';
 import dayjs from 'dayjs';
 import { useNavigation } from '@react-navigation/native';
@@ -34,10 +36,108 @@ const TYPE_HINT: Record<NewHabitType, string> = {
     timer: 'RUN A CLOCK',
 };
 
+interface HabitRowProps {
+    habitId: string;
+    navigation: any;
+    theme: any;
+    todayStr: string;
+    toggleHabit: (id: string, date: string) => void;
+    updateNumericProgress: (id: string, date: string, delta: number) => void;
+}
+
+/**
+ * One habit row that subscribes to *its own* habit via useHabit(id). Because the
+ * normalized store rebuilds only the habit that changed, ticking or incrementing one
+ * habit re-renders exactly this row and leaves every sibling untouched — the fix for
+ * "lags when I switch tabs" once a profile has many habits. Memoised so a parent
+ * re-render (e.g. the Explore occupancy list changing) never repaints a whole list of
+ * rows whose own habit did not move.
+ */
+const HabitRow = React.memo(({
+    habitId,
+    navigation,
+    theme,
+    todayStr,
+    toggleHabit,
+    updateNumericProgress,
+}: HabitRowProps) => {
+    const item = useHabit(habitId);
+    if (!item) return null;
+    return (
+        <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => navigation.navigate('HabitDetail', { habitId: item.id })}
+        >
+            <NothingCard margin="xs" style={styles.habitCard}>
+                <View style={styles.habitMain}>
+                    <View style={styles.habitInfo}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            {item.type === 'timer' && <Timer size={14} color={theme.colors.textSecondary} style={{ marginRight: 6 }} />}
+                            {item.type === 'numeric' && <TrendingUp size={14} color={theme.colors.textSecondary} style={{ marginRight: 6 }} />}
+                            <NothingText variant="bold" size={18}>{item.title}</NothingText>
+                        </View>
+                        <View style={styles.streakContainer}>
+                            <Flame size={14} color={theme.colors.primary} />
+                            <NothingText size={12} color={theme.colors.textSecondary} style={styles.streakText}>
+                                {item.streak} DAY STREAK
+                            </NothingText>
+                        </View>
+                    </View>
+
+                    {/* Slot decides the control, not the raw isSensorBased flag: a sensor
+                        habit whose templateId survived but whose sensorType was lost must
+                        still render AUTO, not hand-editable +/- over a measured number. */}
+                    {habitSlot(item) ? (
+                        <View style={{ alignItems: 'flex-end', justifyContent: 'center', paddingRight: 8 }}>
+                            <NothingText size={10} color={theme.colors.primary} variant="bold">AUTO</NothingText>
+                            <Activity size={20} color={theme.colors.primary + '50'} />
+                        </View>
+                    ) : item.type === 'numeric' ? (
+                        <View style={styles.numericControls}>
+                            <TouchableOpacity
+                                style={[styles.numericBtn, { borderColor: theme.colors.border }]}
+                                onPress={() => updateNumericProgress(item.id, todayStr, -1)}
+                            >
+                                <Minus size={18} color={theme.colors.text} />
+                            </TouchableOpacity>
+                            <View style={styles.progressText}>
+                                <NothingText variant="bold" size={16}>{item.numericProgress?.[todayStr] || 0}</NothingText>
+                                <NothingText size={8} color={theme.colors.textSecondary}>{item.numericUnit?.toUpperCase()}</NothingText>
+                            </View>
+                            <TouchableOpacity
+                                style={[styles.numericBtn, { borderColor: theme.colors.border, backgroundColor: (item.numericProgress?.[todayStr] || 0) >= (item.numericGoal || 1) ? theme.colors.primary : 'transparent' }]}
+                                onPress={() => updateNumericProgress(item.id, todayStr, 1)}
+                            >
+                                <Plus size={18} color={(item.numericProgress?.[todayStr] || 0) >= (item.numericGoal || 1) ? theme.colors.background : theme.colors.text} />
+                            </TouchableOpacity>
+                        </View>
+                    ) : (
+                        <TouchableOpacity
+                            onPress={() => toggleHabit(item.id, todayStr)}
+                            style={[
+                                styles.checkBtn,
+                                { borderColor: theme.colors.border },
+                                item.completedDates.includes(todayStr) && { backgroundColor: theme.colors.text, borderColor: theme.colors.text }
+                            ]}
+                        >
+                            <Check
+                                color={item.completedDates.includes(todayStr) ? theme.colors.background : theme.colors.textSecondary}
+                                size={24}
+                            />
+                        </TouchableOpacity>
+                    )}
+                </View>
+            </NothingCard>
+        </TouchableOpacity>
+    );
+});
+HabitRow.displayName = 'HabitRow';
+
 export const HabitsScreen = () => {
     const route = useRoute<any>();
     const navigation = useNavigation<any>();
-    const habits = useAppStore(s => s.habits);
+    const habitIds = useHabitIds();
+    const occupiedSlots = useOccupiedSensorSlots();
     const addHabit = useAppStore(s => s.addHabit);
     const toggleHabit = useAppStore(s => s.toggleHabit);
     const updateNumericProgress = useAppStore(s => s.updateNumericProgress);
@@ -60,10 +160,16 @@ export const HabitsScreen = () => {
         if (route.params?.templateId) {
             const template = COMMON_HABITS_TEMPLATES.find(t => t.id === route.params.templateId);
             if (template) {
-                // Check if already exists
-                const existing = habits.find(h => h.sensorType === template.sensorType);
-                if (existing) {
-                    navigation.navigate('HabitDetail', { habitId: existing.id });
+                // Match by slot, never a raw sensorType compare: a non-sensor template has
+                // no sensorType, and `h.sensorType === undefined` would collide with every
+                // hand-made habit. Read the store imperatively so the effect stays unsubscribed.
+                const slot = habitSlot(template);
+                const { habitsById, habitIds: ids } = useAppStore.getState();
+                const existingId = slot
+                    ? ids.find(id => habitSlot(habitsById[id]) === slot)
+                    : undefined;
+                if (existingId) {
+                    navigation.navigate('HabitDetail', { habitId: existingId });
                 } else {
                     setActiveTab('explore');
                     navigation.navigate('HabitKnowledge', { template });
@@ -133,69 +239,15 @@ export const HabitsScreen = () => {
 
     const todayStr = dayjs().format('YYYY-MM-DD');
 
-    const renderHabit = useCallback(({ item }: { item: Habit }) => (
-        <TouchableOpacity
-            activeOpacity={0.7}
-            onPress={() => navigation.navigate('HabitDetail', { habitId: item.id })}
-        >
-            <NothingCard margin="xs" style={styles.habitCard}>
-                <View style={styles.habitMain}>
-                    <View style={styles.habitInfo}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                            {item.type === 'timer' && <Timer size={14} color={theme.colors.textSecondary} style={{ marginRight: 6 }} />}
-                            {item.type === 'numeric' && <TrendingUp size={14} color={theme.colors.textSecondary} style={{ marginRight: 6 }} />}
-                            <NothingText variant="bold" size={18}>{item.title}</NothingText>
-                        </View>
-                        <View style={styles.streakContainer}>
-                            <Flame size={14} color={theme.colors.primary} />
-                            <NothingText size={12} color={theme.colors.textSecondary} style={styles.streakText}>
-                                {item.streak} DAY STREAK
-                            </NothingText>
-                        </View>
-                    </View>
-
-                    {item.isSensorBased ? (
-                        <View style={{ alignItems: 'flex-end', justifyContent: 'center', paddingRight: 8 }}>
-                            <NothingText size={10} color={theme.colors.primary} variant="bold">AUTO</NothingText>
-                            <Activity size={20} color={theme.colors.primary + '50'} />
-                        </View>
-                    ) : item.type === 'numeric' ? (
-                        <View style={styles.numericControls}>
-                            <TouchableOpacity
-                                style={[styles.numericBtn, { borderColor: theme.colors.border }]}
-                                onPress={() => updateNumericProgress(item.id, todayStr, -1)}
-                            >
-                                <Minus size={18} color={theme.colors.text} />
-                            </TouchableOpacity>
-                            <View style={styles.progressText}>
-                                <NothingText variant="bold" size={16}>{item.numericProgress?.[todayStr] || 0}</NothingText>
-                                <NothingText size={8} color={theme.colors.textSecondary}>{item.numericUnit?.toUpperCase()}</NothingText>
-                            </View>
-                            <TouchableOpacity
-                                style={[styles.numericBtn, { borderColor: theme.colors.border, backgroundColor: (item.numericProgress?.[todayStr] || 0) >= (item.numericGoal || 1) ? theme.colors.primary : 'transparent' }]}
-                                onPress={() => updateNumericProgress(item.id, todayStr, 1)}
-                            >
-                                <Plus size={18} color={(item.numericProgress?.[todayStr] || 0) >= (item.numericGoal || 1) ? theme.colors.background : theme.colors.text} />
-                            </TouchableOpacity>
-                        </View>
-                    ) : (
-                        <TouchableOpacity
-                            onPress={() => toggleHabit(item.id, todayStr)}
-                            style={[
-                                styles.checkBtn,
-                                { borderColor: theme.colors.border },
-                                item.completedDates.includes(todayStr) && { backgroundColor: theme.colors.text, borderColor: theme.colors.text }
-                            ]}
-                        >
-                            <Check
-                                color={item.completedDates.includes(todayStr) ? theme.colors.background : theme.colors.textSecondary}
-                                size={24}
-                            />
-                        </TouchableOpacity>
-                    )}
-                </View>
-            </NothingCard>
-        </TouchableOpacity>
+    const renderMyItem = useCallback(({ item }: { item: string }) => (
+        <HabitRow
+            habitId={item}
+            navigation={navigation}
+            theme={theme}
+            todayStr={todayStr}
+            toggleHabit={toggleHabit}
+            updateNumericProgress={updateNumericProgress}
+        />
     ), [navigation, theme, todayStr, toggleHabit, updateNumericProgress]);
 
     return (
@@ -231,13 +283,13 @@ export const HabitsScreen = () => {
                 maxToRenderPerBatch={8}
                 windowSize={5}
                 removeClippedSubviews={Platform.OS === 'android'}
-                data={activeTab === 'my' ? habits : [
-                    { id: 'header_sensor', isHeader: true, title: 'PREMIUM SENSORS' },
+                data={activeTab === 'my' ? habitIds : [
+                    { id: 'header_sensor', isHeader: true, title: 'SENSORS' },
                     ...COMMON_HABITS_TEMPLATES.filter(t => t.isSensorBased),
-                    { id: 'header_regular', isHeader: true, title: 'REGULAR HABITS' },
+                    { id: 'header_regular', isHeader: true, title: 'REGULAR' },
                     ...COMMON_HABITS_TEMPLATES.filter(t => !t.isSensorBased)
                 ] as any}
-                renderItem={(activeTab === 'my' ? renderHabit : ({ item }: { item: any }) => {
+                renderItem={(activeTab === 'my' ? renderMyItem : ({ item }: { item: any }) => {
                     if (item.isHeader) {
                         return (
                             <View style={{ paddingVertical: 12, paddingHorizontal: 4, marginTop: item.title === 'REGULAR HABITS' ? 16 : 0 }}>
@@ -248,14 +300,21 @@ export const HabitsScreen = () => {
                     }
 
                     const isSensor = item.isSensorBased;
+                    // Resolve the template's slot (templateId→slot, sensorType fallback) and
+                    // ask the stable occupancy list whether a habit already fills it — no
+                    // subscription to habit *contents*, so this list does not repaint on a tick.
+                    const slot = isSensor ? habitSlot(item) : null;
+                    const added = !!slot && occupiedSlots.includes(slot);
 
                     return (
                         <TouchableOpacity
                             onPress={() => {
-                                const exists = isSensor && habits.some(h => h.sensorType === item.sensorType);
-                                if (exists) {
-                                    const habit = habits.find(h => h.sensorType === item.sensorType);
-                                    if (habit) navigation.navigate('HabitDetail', { habitId: habit.id });
+                                if (added && slot) {
+                                    // Resolve the occupying habit imperatively at tap time, so the
+                                    // row never subscribes to habit contents just to navigate.
+                                    const st = useAppStore.getState();
+                                    const existingId = st.habitIds.find(id => habitSlot(st.habitsById[id]) === slot);
+                                    if (existingId) navigation.navigate('HabitDetail', { habitId: existingId });
                                 } else {
                                     handleTemplateSelect(item);
                                 }
@@ -292,9 +351,9 @@ export const HabitsScreen = () => {
                                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                                             <NothingText variant="bold" size={16} color={isSensor ? theme.colors.text : theme.colors.text}>{item.title}</NothingText>
                                             {isSensor && (
-                                                <View style={{ marginLeft: 8, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 2, backgroundColor: habits.some(h => h.sensorType === item.sensorType) ? theme.colors.success + '20' : theme.colors.primary + '20' }}>
-                                                    <NothingText size={7} color={habits.some(h => h.sensorType === item.sensorType) ? theme.colors.success : theme.colors.primary} variant="bold" style={{ letterSpacing: 1 }}>
-                                                        {habits.some(h => h.sensorType === item.sensorType) ? 'ADDED' : 'AUTO-LINK'}
+                                                <View style={{ marginLeft: 8, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 2, backgroundColor: added ? theme.colors.success + '20' : theme.colors.primary + '20' }}>
+                                                    <NothingText size={7} color={added ? theme.colors.success : theme.colors.primary} variant="bold" style={{ letterSpacing: 1 }}>
+                                                        {added ? 'ADDED' : 'AUTO-LINK'}
                                                     </NothingText>
                                                 </View>
                                             )}
@@ -312,7 +371,7 @@ export const HabitsScreen = () => {
                         </TouchableOpacity>
                     );
                 }) as any}
-                keyExtractor={(item) => item.id}
+                keyExtractor={(activeTab === 'my' ? (item: any) => item : (item: any) => item.id) as any}
                 contentContainerStyle={styles.listContainer}
                 ListEmptyComponent={
                     <View style={styles.emptyContainer}>
@@ -417,10 +476,7 @@ export const HabitsScreen = () => {
                             </View>
 
                             <View style={styles.typeHeaderRow}>
-                                <NothingText variant="bold" size={14}>GOAL TYPE</NothingText>
-                                <NothingText size={10} color={theme.colors.textSecondary} style={styles.typeHint}>
-                                    {TYPE_HINT[newType]}
-                                </NothingText>
+                                <NothingText variant="bold" size={14}>TYPE</NothingText>
                             </View>
                             <View style={styles.typeRow}>
                                 {HABIT_TYPES.map(({ key, Icon, label }) => {
@@ -483,7 +539,7 @@ export const HabitsScreen = () => {
 
                             {newType === 'timer' && (
                                 <View style={{ marginBottom: 24 }}>
-                                    <NothingText variant="bold" size={14} style={{ marginBottom: 12 }}>GOAL DURATION (MINS)</NothingText>
+                                    <NothingText variant="bold" size={14} style={{ marginBottom: 12 }}>DURATION (MINS)</NothingText>
                                     <NothingInput
                                         placeholder="10"
                                         value={newTimerGoal}

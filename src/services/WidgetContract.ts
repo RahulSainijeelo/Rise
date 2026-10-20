@@ -154,15 +154,6 @@ export interface SensorSlotPayload {
     controls?: WidgetControl[];
     /** True when the native service is actively feeding this slot. */
     live?: boolean;
-    /**
-     * False when the user has switched this slot's sensor off.
-     *
-     * Distinct from `live`: `live` says the service is currently feeding this slot,
-     * `tracking` says the user wants it to. A paused slot keeps the progress it had
-     * banked — pausing is not a reset — and its sensor listener is unregistered so
-     * it costs no battery.
-     */
-    tracking?: boolean;
     /** Secondary status line, e.g. "0 UNLOCKS SINCE 22:00". */
     note?: string;
 }
@@ -208,8 +199,21 @@ export interface SensorRuntimeSlot {
 // Pending ops (native -> JS)
 // ---------------------------------------------------------------------------
 
-export const PENDING_OPS = ['inc', 'toggle', 'timerAdd', 'sunsetConfirm', 'sunsetSlipped'] as const;
+/**
+ * Pending-op names, mirrored in WidgetContract.kt.
+ *
+ * `taskToggle` is the odd one out: it toggles a TASK's completion, not a habit.
+ * It reuses the PendingOp envelope, carrying the taskId in the `habitId` field and
+ * leaving `slot`/`amount` empty. It exists because the Tasks widget used to flip a
+ * task's status only inside its own prefs blob, which JS never read back and the
+ * next render overwrote — so the tap was silently lost. Routing it through the
+ * queue (like every habit op) is what makes a widget task-toggle durable.
+ */
+export const PENDING_OPS = ['inc', 'toggle', 'timerAdd', 'sunsetConfirm', 'sunsetSlipped', 'taskToggle'] as const;
 export type PendingOpName = (typeof PENDING_OPS)[number];
+
+/** Op-name constant for the Tasks-widget toggle. Must equal WidgetContract.kt OP_TASK_TOGGLE. */
+export const OP_TASK_TOGGLE: PendingOpName = 'taskToggle';
 
 export interface PendingOp {
     /** Dedupe key. JS must ignore an opId it has already applied. */

@@ -201,12 +201,21 @@ class HabitMatrixFactory(private val context: Context) : RemoteViewsService.Remo
     private var rows: List<HabitMatrix.Row> = emptyList()
 
     override fun onCreate() {
-        rows = HabitMatrix.load(context)
+        rows = loadGated()
     }
 
     override fun onDataSetChanged() {
-        rows = HabitMatrix.load(context)
+        rows = loadGated()
     }
+
+    /**
+     * Login gate around the matrix read. Without it a signed-out device keeps the
+     * previous user's rows (JS clearWidgetData does not empty KEY_HABIT_HISTORY). The
+     * sensor renders and the task widget already gate on WidgetContract.isLoggedIn;
+     * mirror that here by producing zero rows, which draws the collection's empty state.
+     */
+    private fun loadGated(): List<HabitMatrix.Row> =
+        if (WidgetContract.isLoggedIn(context)) HabitMatrix.load(context) else emptyList()
 
     override fun onDestroy() {}
 

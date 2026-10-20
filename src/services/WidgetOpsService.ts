@@ -58,7 +58,17 @@ const isKnownOp = (name: string): name is PendingOpName =>
     name === 'toggle' ||
     name === 'timerAdd' ||
     name === 'sunsetConfirm' ||
-    name === 'sunsetSlipped';
+    name === 'sunsetSlipped' ||
+    name === 'taskToggle';
+
+/**
+ * Resolve a habit by id from the store, tolerating both the legacy flat
+ * `habits: Habit[]` shape and the normalized `habitsById` map.
+ */
+const findHabit = (store: any, id: string): any => {
+    if (store.habitsById && store.habitsById[id]) return store.habitsById[id];
+    return (store.habits || []).find((h: any) => h.id === id);
+};
 
 /**
  * Apply one op to the store.
@@ -68,7 +78,17 @@ const isKnownOp = (name: string): name is PendingOpName =>
  * rather than retried, because there is nothing a retry would fix.
  */
 const applyOne = (store: any, op: PendingOp): boolean => {
-    const habit = (store.habits || []).find((h: any) => h.id === op.habitId);
+    // A task toggle is not a habit op: the taskId travels in the habitId field and
+    // the store owns the completion/reminder side effects via toggleTask.
+    if (op.op === 'taskToggle') {
+        if (typeof store.toggleTask === 'function') {
+            store.toggleTask(op.habitId);
+            return true;
+        }
+        return false;
+    }
+
+    const habit = findHabit(store, op.habitId);
     if (!habit) return false;
 
     const date = dateOf(op);

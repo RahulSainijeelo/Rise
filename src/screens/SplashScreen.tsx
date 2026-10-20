@@ -2,16 +2,13 @@ import React, { useEffect, useRef } from 'react';
 import { View, Animated, StyleSheet, Dimensions } from 'react-native';
 import { useTheme } from '../theme';
 import { NothingText } from '../components/NothingText';
-import { useAppStore } from '../store/useAppStore';
-import { SettingsService } from '../services/SettingsService';
-import { StorageService } from '../services/StorageService';
+import { restoreDefaultProfile } from '../utils/restoreProfile';
 import { RiseLogoAnimation } from '../components/RiseLogoAnimation';
 
 const { width } = Dimensions.get('window');
 
 export const SplashScreen = ({ navigation }: any) => {
     const { theme } = useTheme();
-    const { login } = useAppStore();
 
     // Animation Values
     const scale = useRef(new Animated.Value(0.8)).current;
@@ -45,26 +42,21 @@ export const SplashScreen = ({ navigation }: any) => {
         // 3. Navigation Logic after animation
         const init = async () => {
             const minWait = new Promise<void>(resolve => setTimeout(() => resolve(), 2000));
-            const settings = await SettingsService.getSettings();
 
+            // Hold for the full animation, then reopen into the saved profile. The
+            // restore itself (load the real name, log in) lives in one shared helper
+            // now, so Splash, App and the widget handler can never drift into
+            // restoring differently — the drift that left widget launches on a blank
+            // profile. A truthy result means a profile is active (Splash restored it,
+            // or App already did during the wait); otherwise there is nothing to
+            // reopen into, so go to Login. (P-10)
             await minWait;
 
-            if (settings.defaultProfile) {
-                // Try to load the profile data to get the name if we only have ID
-                const userData = await StorageService.loadUserData(settings.defaultProfile);
-
-                if (userData) {
-                    const profile = {
-                        id: settings.defaultProfile,
-                        name: userData.name || settings.defaultProfile
-                    };
-                    await login(profile);
-                    navigation.replace('Main');
-                    return;
-                }
+            if (await restoreDefaultProfile()) {
+                navigation.replace('Main');
+            } else {
+                navigation.replace('Login');
             }
-
-            navigation.replace('Login');
         };
 
         init();

@@ -6,6 +6,7 @@ import { NothingText } from '../components/NothingText';
 import { NothingCard } from '../components/NothingCard';
 import { Calendar } from 'react-native-calendars';
 import { useAppStore } from '../store/useAppStore';
+import { useHabitsArray } from '../store/selectors';
 import { X, CheckCircle2, Circle, Flame } from 'lucide-react-native';
 import dayjs from 'dayjs';
 import { styles } from '../styles/HomeScreen.styles';
@@ -41,7 +42,12 @@ export const HomeScreen = () => {
     const [selectedDate, setSelectedDate] = useState(dayjs().format('YYYY-MM-DD'));
     const [modalVisible, setModalVisible] = useState(false);
     const tasks = useAppStore(s => s.tasks);
-    const habits = useAppStore(s => s.habits);
+    // Habits as a flat array via the memoized selector: Home only needs aggregates
+    // (the day's completed habits and the calendar dots), not a per-habit list, and
+    // this array keeps a stable identity until a habit actually changes — so the
+    // two useMemos below recompute exactly when they should and a timer tick no
+    // longer re-renders the whole calendar. (SET G / F11)
+    const habits = useHabitsArray();
     const { theme } = useTheme();
 
     const dayTasks = useMemo(() => {

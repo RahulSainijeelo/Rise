@@ -25,7 +25,8 @@ import {
 } from 'lucide-react-native';
 import { useTheme } from '../theme';
 import { NothingText } from '../components/NothingText';
-import { useAppStore } from '../store/useAppStore';
+import { useHabitsArray } from '../store/selectors';
+import { habitSlot } from '../services/WidgetContract';
 import {
     DEFAULT_WATCH_FACE,
     getDeckLayout,
@@ -51,7 +52,8 @@ import { DeckHabitCard } from '../components/deck/DeckHabitCard';
  * a switch between them. The user's verdict was that this was one thing pretending to
  * be two — "we don't have to edit both modes individually they are basically one" — so
  * there is now a single list, and the modes differ only in what they let you touch.
- * Nothing you can reach in zen mode can change the deck.
+ * Nothing you can reach in zen mode can change the deck's *arrangement*; habit cards,
+ * though, keep their controls there, so you can still log progress without leaving zen.
  *
  * Zen still has to be a full-screen Modal rather than a state flag on this screen,
  * because GlobalHeader is rendered by TabNavigator *above* the navigator: a screen
@@ -64,7 +66,10 @@ type CardVariant = 'normal' | 'edit' | 'zen';
 
 export const DeckScreen = ({ navigation }: any) => {
     const { theme } = useTheme();
-    const habits = useAppStore(s => s.habits);
+    // The Deck shows only a handful of cards, so the whole-list array is fine here;
+    // per-card isolation comes from DeckHabitCard being memoised and the normalized
+    // store keeping each unchanged habit's identity stable (see openHabit below).
+    const habits = useHabitsArray();
 
     const [layout, setLayout] = useState<DeckLayout | null>(null);
     const [mode, setMode] = useState<DeckViewMode>('normal');
@@ -115,6 +120,14 @@ export const DeckScreen = ({ navigation }: any) => {
         [layout, commit],
     );
 
+    // Stable across re-renders so DeckHabitCard's React.memo can skip the cards whose
+    // habit did not change. An inline arrow in renderCard would mint a new onOpen every
+    // render — including the once-a-second clock tick — and defeat the memo entirely.
+    const openHabit = useCallback(
+        (id: string) => navigation.navigate('HabitDetail', { habitId: id }),
+        [navigation],
+    );
+
     const addCard = (card: DeckCard) => mutate(cards => [...cards, card]);
 
     const removeCard = (id: string) => mutate(cards => cards.filter(c => c.id !== id));
@@ -154,6 +167,14 @@ export const DeckScreen = ({ navigation }: any) => {
         // Only the normal deck is operable. In edit mode the cards are the thing being
         // arranged, so a stray tap should not start a focus session.
         const interactive = variant === 'normal';
+
+        // Habits are the exception: their controls are live in zen too, so a propped-up
+        // phone can still log a glass of water or check off a habit without dropping out
+        // of zen. Only the controls — not onOpen, which would navigate to a detail screen
+        // *behind* the zen modal. Sensor-counted and inverse-goal habits stay read-only
+        // regardless, because DeckHabitCard refuses them a control either way (their
+        // honest control is the sensor switch, which lives on the habit screen + widget).
+        const habitControls = variant === 'normal' || variant === 'zen';
 
         switch (card.kind) {
             case 'clock':
@@ -199,12 +220,8 @@ export const DeckScreen = ({ navigation }: any) => {
                         active={live}
                         scale={zen ? 1.15 : 1}
                         chrome={variant === 'normal'}
-                        controls={interactive}
-                        onOpen={
-                            interactive
-                                ? id => navigation.navigate('HabitDetail', { habitId: id })
-                                : undefined
-                        }
+                        controls={habitControls}
+                        onOpen={interactive ? openHabit : undefined}
                     />
                 );
             }
@@ -570,7 +587,7 @@ export const DeckScreen = ({ navigation }: any) => {
                                             </NothingText>
                                             <NothingText size={9} color={theme.colors.textSecondary} style={{ letterSpacing: 1 }}>
                                                 {habit.type.toUpperCase()}
-                                                {habit.sensorType ? ` · ${habit.sensorType.toUpperCase()}` : ''}
+                                                {habitSlot(habit) ? ` · ${habitSlot(habit)!.toUpperCase()}` : ''}
                                             </NothingText>
                                         </View>
                                     </TouchableOpacity>
